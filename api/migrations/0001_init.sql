@@ -1,43 +1,43 @@
--- Projects table
+-- Postgres schema for game-dev-memory (Neon)
+
 CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY,
   name TEXT NOT NULL,
   engine TEXT NOT NULL DEFAULT 'custom',
-  description TEXT DEFAULT '',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  description TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
 );
 
--- Memories table
 CREATE TABLE IF NOT EXISTS memories (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   category TEXT NOT NULL,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
-  tags TEXT DEFAULT '[]',
-  context TEXT DEFAULT '{}',
-  confidence REAL DEFAULT 0.5,
-  access_count INTEGER DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+  context JSONB NOT NULL DEFAULT '{}'::jsonb,
+  confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+  access_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id);
 CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
 CREATE INDEX IF NOT EXISTS idx_memories_updated ON memories(updated_at);
 
--- Evolution events table
 CREATE TABLE IF NOT EXISTS evolution_events (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY,
   type TEXT NOT NULL,
-  parent_id TEXT,
+  parent_id UUID REFERENCES evolution_events(id),
   description TEXT NOT NULL,
-  changes TEXT DEFAULT '{}',
+  changes JSONB NOT NULL DEFAULT '{}'::jsonb,
   result TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  FOREIGN KEY (parent_id) REFERENCES evolution_events(id)
+  created_at TIMESTAMPTZ NOT NULL,
+
+  CONSTRAINT evolution_events_type_chk CHECK (type IN ('repair', 'optimize', 'innovate')),
+  CONSTRAINT evolution_events_result_chk CHECK (result IN ('success', 'failure', 'partial'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_type ON evolution_events(type);

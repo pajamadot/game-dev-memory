@@ -13,6 +13,35 @@ const GENES_PATH = path.resolve(__dirname, "../assets/genes/genes.json");
 const CAPSULES_PATH = path.resolve(__dirname, "../assets/genes/capsules.json");
 const EVENTS_PATH = path.resolve(__dirname, "../assets/genes/events.jsonl");
 
+function normalizeTags(tags) {
+  if (!tags) return [];
+  if (Array.isArray(tags)) return tags.filter((t) => typeof t === "string");
+  if (typeof tags === "string") {
+    try {
+      const parsed = JSON.parse(tags);
+      if (Array.isArray(parsed)) return parsed.filter((t) => typeof t === "string");
+    } catch {
+      // ignore
+    }
+  }
+  return [];
+}
+
+function normalizeContext(ctx) {
+  if (!ctx) return {};
+  if (typeof ctx === "string") {
+    try {
+      const parsed = JSON.parse(ctx);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch {
+      // ignore
+    }
+    return {};
+  }
+  if (ctx && typeof ctx === "object" && !Array.isArray(ctx)) return ctx;
+  return {};
+}
+
 /**
  * Run a single evolution cycle.
  */
@@ -194,10 +223,17 @@ async function executeRepair(mutation, apiUrl) {
     const projRes = await fetch(`${apiUrl}/api/projects/${memory.project_id}`);
     if (!projRes.ok) {
       // Mark orphaned memory with zero confidence
+      const tags = normalizeTags(memory.tags);
+      const context = normalizeContext(memory.context);
       await fetch(`${apiUrl}/api/memories/${memory.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...memory, confidence: 0, tags: [...JSON.parse(memory.tags || "[]"), "orphaned"] }),
+        body: JSON.stringify({
+          ...memory,
+          confidence: 0,
+          tags: [...new Set([...tags, "orphaned"])],
+          context,
+        }),
       });
       repaired++;
     }
@@ -226,10 +262,12 @@ async function executeOptimize(mutation, apiUrl) {
     for (const memory of memories) {
       if (memory.access_count > 10 && memory.confidence < 1.0) {
         const newConfidence = Math.min(memory.confidence + 0.1, 1.0);
+        const tags = normalizeTags(memory.tags);
+        const context = normalizeContext(memory.context);
         await fetch(`${apiUrl}/api/memories/${memory.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...memory, confidence: newConfidence }),
+          body: JSON.stringify({ ...memory, confidence: newConfidence, tags, context }),
         });
         optimized++;
       }

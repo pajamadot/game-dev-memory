@@ -1,7 +1,8 @@
 export interface Env {
-  DB: D1Database;
-  MEMORY_KV: KVNamespace;
+  HYPERDRIVE?: Hyperdrive;
   ENVIRONMENT: string;
+  // Fallback for local execution/testing without a Hyperdrive binding.
+  DATABASE_URL?: string;
 }
 
 export interface Memory {

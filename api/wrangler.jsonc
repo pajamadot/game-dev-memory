@@ -4,26 +4,30 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "game-dev-memory-api",
   "main": "src/index.ts",
-  "compatibility_date": "2024-12-01",
+  "compatibility_date": "2026-02-08",
+  "compatibility_flags": ["nodejs_compat"],
 
   "vars": {
     "ENVIRONMENT": "development"
   },
 
-  // D1 Database for structured memory storage
-  "d1_databases": [
+  // Neon Postgres via Cloudflare Hyperdrive
+  //
+  // Hyperdrive config:
+  // - name: game-dev-memory-neon-db
+  // - id: bf4313a26dc64a7080f23b9932a4c8a0
+  //
+  // If you need to recreate it:
+  //   npx wrangler hyperdrive create game-dev-memory-neon-db --connection-string "$(Get-Content ..\\secrets\\neondb.env -Raw)"
+  //
+  // For local development, set:
+  //   $env:WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE = "postgres://localhost:5432/..."
+  //
+  // NOTE: Wrangler expects a LOCAL Postgres connection string to emulate Hyperdrive.
+  "hyperdrive": [
     {
-      "binding": "DB",
-      "database_name": "game-dev-memory",
-      "database_id": "placeholder-replace-after-creation"
-    }
-  ],
-
-  // KV Namespace for fast memory retrieval cache
-  "kv_namespaces": [
-    {
-      "binding": "MEMORY_KV",
-      "id": "placeholder-replace-after-creation"
+      "binding": "HYPERDRIVE",
+      "id": "bf4313a26dc64a7080f23b9932a4c8a0"
     }
   ]
 }

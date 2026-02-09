@@ -1,25 +1,36 @@
 import { Hono } from "hono";
 import type { Env } from "../types";
+import { withDbClient } from "../db";
 
 export const projectsRouter = new Hono<{ Bindings: Env }>();
 
 projectsRouter.get("/", async (c) => {
-  const result = await c.env.DB.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all();
-  return c.json({ projects: result.results });
+  const projects = await withDbClient(c.env, async (db) => {
+    const { rows } = await db.query("SELECT * FROM projects ORDER BY updated_at DESC");
+    return rows;
+  });
+
+  return c.json({ projects });
 });
 
 projectsRouter.get("/:id", async (c) => {
   const id = c.req.param("id");
-  const project = await c.env.DB.prepare("SELECT * FROM projects WHERE id = ?").bind(id).first();
+  const { project, memoryStats } = await withDbClient(c.env, async (db) => {
+    const projRes = await db.query("SELECT * FROM projects WHERE id = $1", [id]);
+    const projectRow = projRes.rows[0] ?? null;
+
+    if (!projectRow) return { project: null, memoryStats: [] };
+
+    const statsRes = await db.query(
+      "SELECT category, COUNT(*)::int AS count FROM memories WHERE project_id = $1 GROUP BY category",
+      [id]
+    );
+
+    return { project: projectRow, memoryStats: statsRes.rows };
+  });
+
   if (!project) return c.json({ error: "Project not found" }, 404);
-
-  const memoryCount = await c.env.DB.prepare(
-    "SELECT category, COUNT(*) as count FROM memories WHERE project_id = ? GROUP BY category"
-  )
-    .bind(id)
-    .all();
-
-  return c.json({ ...project, memory_stats: memoryCount.results });
+  return c.json({ ...project, memory_stats: memoryStats });
 });
 
 projectsRouter.post("/", async (c) => {
@@ -27,11 +38,12 @@ projectsRouter.post("/", async (c) => {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  await c.env.DB.prepare(
-    "INSERT INTO projects (id, name, engine, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-  )
-    .bind(id, body.name, body.engine || "custom", body.description || "", now, now)
-    .run();
+  await withDbClient(c.env, async (db) => {
+    await db.query(
+      "INSERT INTO projects (id, name, engine, description, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
+      [id, body.name, body.engine || "custom", body.description || "", now, now]
+    );
+  });
 
   return c.json({ id, created_at: now }, 201);
 });
@@ -41,15 +53,23 @@ projectsRouter.put("/:id", async (c) => {
   const body = await c.req.json();
   const now = new Date().toISOString();
 
-  await c.env.DB.prepare("UPDATE projects SET name = ?, engine = ?, description = ?, updated_at = ? WHERE id = ?")
-    .bind(body.name, body.engine, body.description, now, id)
-    .run();
+  await withDbClient(c.env, async (db) => {
+    await db.query("UPDATE projects SET name = $1, engine = $2, description = $3, updated_at = $4 WHERE id = $5", [
+      body.name,
+      body.engine,
+      body.description,
+      now,
+      id,
+    ]);
+  });
 
   return c.json({ id, updated_at: now });
 });
 
 projectsRouter.delete("/:id", async (c) => {
   const id = c.req.param("id");
-  await c.env.DB.prepare("DELETE FROM projects WHERE id = ?").bind(id).run();
+  await withDbClient(c.env, async (db) => {
+    await db.query("DELETE FROM projects WHERE id = $1", [id]);
+  });
   return c.json({ deleted: true });
 });
