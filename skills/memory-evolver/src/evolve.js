@@ -94,7 +94,7 @@ async function evolve({ review, projectId, drift, apiUrl }) {
   }
 
   // 4. Build mutation plan
-  const mutation = buildMutation(selectedGene, capsuleCandidates, signals);
+  const mutation = buildMutation(selectedGene, capsuleCandidates, signals, projectId);
 
   // 5. Review gate
   if (review) {
@@ -192,7 +192,7 @@ async function gatherSignals(apiUrl, projectId) {
 /**
  * Build a mutation plan from selected gene and context.
  */
-function buildMutation(gene, capsules, signals) {
+function buildMutation(gene, capsules, signals, projectId) {
   return {
     id: generateId(),
     type: gene.mutation_type,
@@ -203,6 +203,7 @@ function buildMutation(gene, capsules, signals) {
     validation: gene.validation,
     capsule_hint: capsules.length > 0 ? capsules[0].outcome : null,
     signals,
+    project_id: projectId || null,
     created_at: new Date().toISOString(),
   };
 }
@@ -293,12 +294,209 @@ async function executeOptimize(mutation, apiUrl) {
 }
 
 async function executeInnovate(mutation, apiUrl) {
-  // Innovation mutations are more complex - they analyze and create new memories
-  // For now, return a placeholder that the system will build on
+  // Innovation mutations create new memories from recent session data.
+  // Keep it small + safe: no schema changes and avoid duplicating existing patterns.
+
+  if (mutation.gene_id === "gene-seed-missing-categories") {
+    return await seedMissingCategories(apiUrl, mutation.project_id || null);
+  }
+
+  if (mutation.gene_id === "gene-extract-pattern") {
+    return await extractPatternsFromRecentSessions(apiUrl, mutation.project_id || null);
+  }
+
+  return { success: true, message: "No innovate handler for gene_id; skipped.", created: 0 };
+}
+
+async function apiJson(apiUrl, pathnameWithQuery, init = {}) {
+  const res = await fetch(`${apiUrl}${pathnameWithQuery}`, {
+    ...init,
+    headers: { ...(init.headers || {}), ...tenantHeaders() },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${init.method || "GET"} ${pathnameWithQuery} failed (${res.status}): ${text || res.statusText}`);
+  }
+  return await res.json();
+}
+
+async function apiPostJson(apiUrl, pathnameWithQuery, body) {
+  return await apiJson(apiUrl, pathnameWithQuery, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function seedMissingCategories(apiUrl, projectId) {
+  const expected = ["pattern", "decision", "bug", "architecture", "asset", "lesson"];
+
+  const { projects } = await apiJson(apiUrl, "/api/projects");
+  const targetProjectId = projectId || (projects && projects[0] && projects[0].id) || null;
+  if (!targetProjectId) {
+    return { success: true, message: "No projects exist; cannot seed categories.", created: 0 };
+  }
+
+  const createdIds = [];
+
+  for (const category of expected) {
+    const existing = await apiJson(
+      apiUrl,
+      `/api/memories?project_id=${encodeURIComponent(targetProjectId)}&category=${encodeURIComponent(category)}&limit=1`
+    );
+    if (existing && Array.isArray(existing.memories) && existing.memories.length > 0) continue;
+
+    const title = `Seed: ${category}`;
+    const content =
+      category === "pattern"
+        ? "Store recurring problem-solution recipes (what worked repeatedly, when to apply it, and evidence)."
+        : category === "decision"
+          ? "Store architecture or pipeline decisions with rationale, alternatives, and tradeoffs."
+          : category === "bug"
+            ? "Store bug reports with reproduction steps, root cause, fix, and prevention notes."
+            : category === "architecture"
+              ? "Store system design notes: components, data flow, interfaces, invariants, and constraints."
+              : category === "asset"
+                ? "Store asset pipeline notes: formats, import settings, naming conventions, optimization, ownership."
+                : "Store lessons learned (what to do / avoid next time), derived from session outcomes.";
+
+    const res = await apiPostJson(apiUrl, "/api/memories", {
+      project_id: targetProjectId,
+      session_id: null,
+      category,
+      source_type: "evolver",
+      title,
+      content,
+      tags: ["seed", "auto", category],
+      context: { seed: true, category },
+      confidence: 0.4,
+    });
+    if (res && res.id) createdIds.push(res.id);
+  }
+
+  return { success: true, message: "Seeded missing categories (if any).", created: createdIds.length, created_ids: createdIds };
+}
+
+async function extractPatternsFromRecentSessions(apiUrl, projectId) {
+  const ignoreTags = new Set([
+    "auto",
+    "seed",
+    "session-summary",
+    "pattern",
+    "decision",
+    "bug",
+    "architecture",
+    "asset",
+    "lesson",
+    "summary",
+    "note",
+    "evolver",
+  ]);
+
+  const { projects } = await apiJson(apiUrl, "/api/projects");
+  const targetProjectId = projectId || (projects && projects[0] && projects[0].id) || null;
+  if (!targetProjectId) {
+    return { success: true, message: "No projects exist; cannot extract patterns.", created: 0 };
+  }
+
+  const sessRes = await apiJson(
+    apiUrl,
+    `/api/sessions?project_id=${encodeURIComponent(targetProjectId)}&limit=50`
+  );
+  const sessions = Array.isArray(sessRes.sessions) ? sessRes.sessions : [];
+  const closed = sessions.filter((s) => s && s.ended_at).slice(0, 10);
+  if (closed.length === 0) {
+    return { success: true, message: "No closed sessions; nothing to extract.", created: 0 };
+  }
+
+  // Count tags appearing in bug memories across recent closed sessions.
+  const tagCounts = new Map(); // tag -> count
+  const tagSamples = new Map(); // tag -> Set(title)
+  const sessionIds = [];
+
+  for (const s of closed) {
+    sessionIds.push(s.id);
+    const memRes = await apiJson(
+      apiUrl,
+      `/api/memories?project_id=${encodeURIComponent(targetProjectId)}&session_id=${encodeURIComponent(s.id)}&limit=200`
+    );
+    const mems = Array.isArray(memRes.memories) ? memRes.memories : [];
+
+    for (const m of mems) {
+      if (!m || String(m.category).toLowerCase() !== "bug") continue;
+      const tags = normalizeTags(m.tags);
+      for (const t of tags) {
+        const tag = String(t).trim();
+        if (!tag) continue;
+        const key = tag.toLowerCase();
+        if (ignoreTags.has(key)) continue;
+
+        tagCounts.set(key, (tagCounts.get(key) || 0) + 1);
+        if (!tagSamples.has(key)) tagSamples.set(key, new Set());
+        const set = tagSamples.get(key);
+        if (set.size < 5 && m.title) set.add(String(m.title));
+      }
+    }
+  }
+
+  const candidates = [...tagCounts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12);
+
+  if (candidates.length === 0) {
+    return { success: true, message: "No repeated bug tags found; no patterns created.", created: 0 };
+  }
+
+  const createdIds = [];
+
+  for (const [tag, count] of candidates) {
+    // Skip if a pattern for this tag already exists in this project.
+    const exists = await apiJson(
+      apiUrl,
+      `/api/memories?project_id=${encodeURIComponent(targetProjectId)}&category=pattern&tag=${encodeURIComponent(tag)}&limit=1`
+    );
+    if (exists && Array.isArray(exists.memories) && exists.memories.length > 0) continue;
+
+    const samples = [...(tagSamples.get(tag) || new Set())].slice(0, 5);
+    const lines = [];
+    lines.push(`This tag appeared in ${count} bug memories across the last ${closed.length} closed sessions.`);
+    if (samples.length) {
+      lines.push("");
+      lines.push("Examples:");
+      for (const s of samples) lines.push(`- ${s}`);
+    }
+    lines.push("");
+    lines.push("Suggested workflow:");
+    lines.push("- Capture minimal repro + environment");
+    lines.push("- Attach logs/trace artifacts and link relevant chunks");
+    lines.push("- Record the fix and prevention notes as a decision/lesson");
+
+    const res = await apiPostJson(apiUrl, "/api/memories", {
+      project_id: targetProjectId,
+      session_id: null,
+      category: "pattern",
+      source_type: "evolver",
+      title: `Pattern: ${tag}`,
+      content: lines.join("\n"),
+      tags: ["pattern", "auto", tag],
+      context: {
+        derived_from: { session_ids: sessionIds, category: "bug" },
+        tag,
+        occurrences: count,
+        sample_titles: samples,
+      },
+      confidence: 0.55,
+    });
+
+    if (res && res.id) createdIds.push(res.id);
+  }
+
   return {
     success: true,
-    message: "Innovation cycle complete. New patterns extracted.",
-    created: 0,
+    message: "Extracted pattern candidates from recent sessions.",
+    created: createdIds.length,
+    created_ids: createdIds,
   };
 }
 

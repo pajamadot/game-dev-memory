@@ -44,6 +44,17 @@
     "validation": "Bridge memories must reference valid projects and have confidence >= 0.4"
   },
   {
+    "id": "gene-seed-missing-categories",
+    "type": "Gene",
+    "name": "Seed Missing Categories",
+    "description": "Bootstrap missing memory categories with minimal, tenant-scoped seed entries so evolution and retrieval have a stable taxonomy to work with",
+    "signals_match": ["missing_categories"],
+    "mutation_type": "innovate",
+    "instructions": "Detect which categories are missing (pattern, decision, bug, architecture, asset, lesson). Create one low-confidence 'seed' memory per missing category in the most recent project (or selected project) describing what belongs in that category.",
+    "risk": "low",
+    "validation": "After seeding, /api/evolve/signals should no longer report missing_categories for the target scope"
+  },
+  {
     "id": "gene-fix-broken-refs",
     "type": "Gene",
     "name": "Fix Broken References",
