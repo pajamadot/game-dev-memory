@@ -39,4 +39,8 @@ next-env.d.ts
 .vercel
 .turbo
 
+# Skill runtime data
+skills/memory-evolver/.data/
+skills/memory-evolver/*.log
+
 .vercel

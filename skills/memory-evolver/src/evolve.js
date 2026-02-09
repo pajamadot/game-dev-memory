@@ -11,7 +11,10 @@ const { selectGeneAndCapsule } = require("./selector");
 
 const GENES_PATH = path.resolve(__dirname, "../assets/genes/genes.json");
 const CAPSULES_PATH = path.resolve(__dirname, "../assets/genes/capsules.json");
-const EVENTS_PATH = path.resolve(__dirname, "../assets/genes/events.jsonl");
+const ROOT_DIR = path.resolve(__dirname, "..");
+const EVENTS_PATH = process.env.EVOLVER_EVENTS_PATH
+  ? path.resolve(ROOT_DIR, process.env.EVOLVER_EVENTS_PATH)
+  : path.resolve(ROOT_DIR, ".data/events.jsonl");
 
 function tenantHeaders() {
   const tenantType = process.env.MEMORY_TENANT_TYPE;
@@ -505,6 +508,7 @@ async function extractPatternsFromRecentSessions(apiUrl, projectId) {
  */
 function appendEvent(event) {
   try {
+    fs.mkdirSync(path.dirname(EVENTS_PATH), { recursive: true });
     fs.appendFileSync(EVENTS_PATH, JSON.stringify(event) + "\n");
   } catch (err) {
     console.error("[evolve] Failed to append event:", err.message);
