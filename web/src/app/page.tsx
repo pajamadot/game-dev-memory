@@ -206,6 +206,12 @@ export default async function Home() {
               {scope.label} · {scope.badge}
             </Pill>
             <Link
+              href="/team"
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Team
+            </Link>
+            <Link
               href="/research"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
@@ -238,6 +244,23 @@ export default async function Home() {
           <p className="mt-1 text-xs leading-5 text-zinc-600">
             {scope.hint} Switch scope using the org switcher in the top right.
           </p>
+          {!orgId ? (
+            <p className="mt-2 text-xs leading-5 text-zinc-600">
+              Want shared project memory?{" "}
+              <Link className="font-medium text-zinc-950 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800" href="/team">
+                Create an organization and invite teammates
+              </Link>
+              .
+            </p>
+          ) : (
+            <p className="mt-2 text-xs leading-5 text-zinc-600">
+              Invite teammates:{" "}
+              <Link className="font-medium text-zinc-950 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800" href="/team">
+                manage members and invites
+              </Link>
+              .
+            </p>
+          )}
         </div>
 
         <main className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-12">
