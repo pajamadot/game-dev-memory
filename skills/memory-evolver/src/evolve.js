@@ -116,6 +116,7 @@ async function evolve({ review, projectId, drift, apiUrl }) {
     mutation_summary: mutation.description,
     result: result.success ? "success" : "failure",
     details: result,
+    project_id: mutation.project_id || null,
     timestamp: new Date().toISOString(),
   };
 
@@ -172,10 +173,6 @@ async function gatherSignals(apiUrl, projectId) {
       if (highAccess.length > 0) signals.push("high_access_count");
     }
 
-    // Project-specific signals
-    if (projectId) {
-      signals.push("project_focus");
-    }
   } catch (err) {
     signals.push("api_unreachable");
   }
@@ -185,6 +182,9 @@ async function gatherSignals(apiUrl, projectId) {
     signals.push("system_stable");
     signals.push("new_session_data");
   }
+
+  // Add this last so "healthy" projects still get innovation signals.
+  if (projectId) signals.push("project_focus");
 
   return signals;
 }
@@ -520,6 +520,7 @@ async function recordEventToApi(event, apiUrl) {
       method: "POST",
       headers: { "Content-Type": "application/json", ...tenantHeaders() },
       body: JSON.stringify({
+        project_id: event.project_id || null,
         type: event.type,
         parent_id: null,
         description: event.mutation_summary,
