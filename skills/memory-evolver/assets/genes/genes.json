@@ -1,0 +1,68 @@
+[
+  {
+    "id": "gene-consolidate-duplicates",
+    "type": "Gene",
+    "name": "Consolidate Duplicate Memories",
+    "description": "Merge memories with overlapping content into higher-confidence unified entries",
+    "signals_match": ["duplicate_detected", "high_similarity_score", "redundant_memories"],
+    "mutation_type": "optimize",
+    "instructions": "Find memories with >80% content similarity. Merge them, keeping the best title and combining unique tags. Set confidence to max of the merged entries.",
+    "risk": "low",
+    "validation": "Verify merged memory count < original count and no data loss in content field"
+  },
+  {
+    "id": "gene-prune-stale",
+    "type": "Gene",
+    "name": "Prune Stale Memories",
+    "description": "Archive or remove memories that haven't been accessed and are outdated",
+    "signals_match": ["stale_memories_detected", "zero_access_count", "old_memories"],
+    "mutation_type": "optimize",
+    "instructions": "Identify memories older than 30 days with 0 access count and confidence < 0.3. Mark for archival or deletion.",
+    "risk": "medium",
+    "validation": "Verify pruned memories had 0 access and low confidence before removal"
+  },
+  {
+    "id": "gene-extract-pattern",
+    "type": "Gene",
+    "name": "Extract Pattern from Session",
+    "description": "Analyze recent work sessions and extract reusable patterns",
+    "signals_match": ["new_session_data", "recurring_approach", "pattern_candidate"],
+    "mutation_type": "innovate",
+    "instructions": "Scan recent session logs for repeated problem-solution pairs. Create new 'pattern' type memories with appropriate tags and context.",
+    "risk": "low",
+    "validation": "New patterns should not duplicate existing ones (similarity < 60%)"
+  },
+  {
+    "id": "gene-cross-project-bridge",
+    "type": "Gene",
+    "name": "Cross-Project Knowledge Bridge",
+    "description": "Find applicable knowledge from one project that can benefit another",
+    "signals_match": ["multi_project_active", "similar_tech_stack", "shared_engine"],
+    "mutation_type": "innovate",
+    "instructions": "Compare memories across projects sharing the same engine. Identify transferable patterns and create bridge memories tagged with both project IDs.",
+    "risk": "low",
+    "validation": "Bridge memories must reference valid projects and have confidence >= 0.4"
+  },
+  {
+    "id": "gene-fix-broken-refs",
+    "type": "Gene",
+    "name": "Fix Broken References",
+    "description": "Detect and repair memories referencing deleted projects or invalid data",
+    "signals_match": ["reference_error", "orphaned_memory", "invalid_project_id"],
+    "mutation_type": "repair",
+    "instructions": "Find memories with project_id not matching any existing project. Either reassign to correct project or mark confidence to 0 for review.",
+    "risk": "medium",
+    "validation": "All memory project_ids should resolve to valid projects after repair"
+  },
+  {
+    "id": "gene-boost-confidence",
+    "type": "Gene",
+    "name": "Boost High-Value Memory Confidence",
+    "description": "Increase confidence of frequently accessed, validated memories",
+    "signals_match": ["high_access_count", "validated_memory", "frequently_retrieved"],
+    "mutation_type": "optimize",
+    "instructions": "Identify memories with access_count > 10 and positive usage signals. Increase confidence by 0.1, capped at 1.0.",
+    "risk": "low",
+    "validation": "Confidence values must remain in [0, 1] range"
+  }
+]

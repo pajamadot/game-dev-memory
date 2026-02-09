@@ -1,0 +1,22 @@
+[
+  {
+    "id": "capsule-unity-shader-patterns",
+    "type": "Capsule",
+    "name": "Unity Shader Pattern Extraction",
+    "description": "Successfully extracted shader optimization patterns across Unity projects",
+    "trigger": ["unity", "shader", "performance"],
+    "gene_id": "gene-extract-pattern",
+    "outcome": "Created 12 reusable shader optimization memories with avg confidence 0.8",
+    "reproducible": true
+  },
+  {
+    "id": "capsule-godot-migration-bridge",
+    "type": "Capsule",
+    "name": "Godot Version Migration Bridge",
+    "description": "Cross-project knowledge transfer for Godot 3->4 migration patterns",
+    "trigger": ["godot", "migration", "version_upgrade"],
+    "gene_id": "gene-cross-project-bridge",
+    "outcome": "Bridged 23 migration patterns, preventing repeated discovery of breaking changes",
+    "reproducible": true
+  }
+]

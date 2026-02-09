@@ -1,0 +1,29 @@
+{
+  // Game Dev Memory API - Cloudflare Workers Configuration
+  // Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "game-dev-memory-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-01",
+
+  "vars": {
+    "ENVIRONMENT": "development"
+  },
+
+  // D1 Database for structured memory storage
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "game-dev-memory",
+      "database_id": "placeholder-replace-after-creation"
+    }
+  ],
+
+  // KV Namespace for fast memory retrieval cache
+  "kv_namespaces": [
+    {
+      "binding": "MEMORY_KV",
+      "id": "placeholder-replace-after-creation"
+    }
+  ]
+}

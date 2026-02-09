@@ -1,0 +1,13 @@
+{
+  "name": "memory-evolver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-evolving memory system for game dev AI agents",
+  "main": "index.js",
+  "scripts": {
+    "evolve": "node index.js",
+    "evolve:review": "node index.js --review",
+    "evolve:loop": "node index.js --loop",
+    "solidify": "node index.js solidify"
+  }
+}
