@@ -64,17 +64,19 @@ evolveRouter.post("/events", async (c) => {
 evolveRouter.get("/signals", async (c) => {
   const { tenantType, tenantId } = requireTenant(c);
   const projectId = c.req.query("project_id");
-  const { memoryDistribution, recentEvolution, staleMemories } = await withDbClient(c.env, async (db) => {
+  const { memoryDistribution, recentEvolution, staleMemories, sessionStats } = await withDbClient(c.env, async (db) => {
     const params: unknown[] = [tenantType, tenantId];
     let memWhere = "tenant_type = $1 AND tenant_id = $2";
     let eventsWhere = "tenant_type = $1 AND tenant_id = $2";
+    let sessionsWhere = "tenant_type = $1 AND tenant_id = $2";
     if (projectId) {
       params.push(projectId);
       memWhere += ` AND project_id = $${params.length}`;
       eventsWhere += ` AND project_id = $${params.length}`;
+      sessionsWhere += ` AND project_id = $${params.length}`;
     }
 
-    const [memStatsRes, recentRes, staleRes] = await Promise.all([
+    const [memStatsRes, recentRes, staleRes, sessionRes, summaryGapRes] = await Promise.all([
       db.query(
         `SELECT category, COUNT(*)::int AS count, AVG(confidence)::float AS avg_confidence
          FROM memories
@@ -95,12 +97,39 @@ evolveRouter.get("/signals", async (c) => {
          WHERE ${memWhere} AND updated_at < now() - interval '30 days' AND access_count = 0`,
         params
       ),
+      db.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE ended_at IS NULL)::int AS open_sessions,
+           COUNT(*) FILTER (WHERE started_at > now() - interval '7 days')::int AS recent_sessions
+         FROM sessions
+         WHERE ${sessionsWhere}`,
+        params
+      ),
+      db.query(
+        `SELECT COUNT(*)::int AS count
+         FROM sessions s
+         WHERE ${sessionsWhere} AND s.ended_at IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM memories m
+             WHERE m.tenant_type = s.tenant_type
+               AND m.tenant_id = s.tenant_id
+               AND m.session_id = s.id
+               AND m.category = 'summary'
+           )`,
+        params
+      ),
     ]);
 
     return {
       memoryDistribution: memStatsRes.rows,
       recentEvolution: recentRes.rows,
       staleMemories: staleRes.rows[0]?.count ?? 0,
+      sessionStats: {
+        open_sessions: sessionRes.rows[0]?.open_sessions ?? 0,
+        recent_sessions: sessionRes.rows[0]?.recent_sessions ?? 0,
+        closed_sessions_without_summary: summaryGapRes.rows[0]?.count ?? 0,
+      },
     };
   });
 
@@ -108,6 +137,7 @@ evolveRouter.get("/signals", async (c) => {
     memory_distribution: memoryDistribution,
     recent_evolution: recentEvolution,
     stale_memories: staleMemories ?? 0,
+    sessions: sessionStats,
     timestamp: new Date().toISOString(),
   });
 });
