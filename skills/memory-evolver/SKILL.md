@@ -86,3 +86,17 @@ Evolution is driven by reusable "genes" - structured templates that encode speci
 - High-risk mutations (schema changes, bulk updates) require review mode
 - Confidence scores prevent low-quality memories from polluting the system
 - Rollback support via evolution event chain
+
+## Direction (Evolving the Tooling Too)
+
+The evolver isn't just about memory content. Developer experience is part of the system.
+
+Near-term evolution target:
+
+- Add a Rust CLI called `pajama` that uses OAuth PKCE (Claude Code / Codex style) to log in via the web UI and receive an API key.
+- Use the CLI for common operations in agentic coding sessions (projects/memories/assets), and document it as an in-repo skill so agents can use it consistently.
+
+See:
+
+- `docs/roadmap.md`
+- `docs/cli.md`

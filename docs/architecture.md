@@ -4,6 +4,10 @@ This repo is a multi-tenant memory system for game dev agent workflows. It inges
 
 This document describes the target architecture and the current implementation gaps.
 
+For the near-term evolution plan (including the `pajama` Rust CLI + OAuth login flow), see:
+
+- `docs/roadmap.md`
+
 ## Goals
 
 - Make agent sessions cumulative: decisions, bugs, fixes, perf investigations, and learnings should become queryable memory.

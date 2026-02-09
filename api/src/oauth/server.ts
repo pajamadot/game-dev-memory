@@ -24,7 +24,16 @@ export function getOAuthMetadata(request: Request, _env: Env): Record<string, un
     grant_types_supported: ["authorization_code"],
     token_endpoint_auth_methods_supported: ["none"],
     code_challenge_methods_supported: ["S256"],
-    scopes_supported: ["memories:read", "memories:write", "projects:read", "projects:write", "artifacts:read", "artifacts:write"],
+    scopes_supported: [
+      "projects:read",
+      "projects:write",
+      "memories:read",
+      "memories:write",
+      "artifacts:read",
+      "artifacts:write",
+      "assets:read",
+      "assets:write",
+    ],
     service_documentation: `${websiteUrl(_env)}/research/agent-memory`,
   };
 }
@@ -38,7 +47,16 @@ export function getProtectedResourceMetadata(request: Request): Record<string, u
   return {
     resource,
     authorization_servers: [url.origin],
-    scopes_supported: ["memories:read", "memories:write", "projects:read", "projects:write", "artifacts:read", "artifacts:write"],
+    scopes_supported: [
+      "projects:read",
+      "projects:write",
+      "memories:read",
+      "memories:write",
+      "artifacts:read",
+      "artifacts:write",
+      "assets:read",
+      "assets:write",
+    ],
     bearer_methods_supported: ["header"],
   };
 }
@@ -285,4 +303,3 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
 function oauthError(error: { error: string; error_description?: string }, status = 400): Response {
   return new Response(JSON.stringify(error), { status, headers: { "content-type": "application/json" } });
 }
-

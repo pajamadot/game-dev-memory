@@ -47,9 +47,9 @@ export default async function McpAuthorizePage({
         <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col justify-center px-6 py-16">
           <div className="rounded-3xl border border-zinc-200/70 bg-white/70 p-10 shadow-sm backdrop-blur">
             <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">OAUTH</p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950">Authorize MCP Client</h1>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950">Authorize Client</h1>
             <p className="mt-2 text-sm leading-6 text-zinc-600">
-              Sign in to approve access for this MCP client.
+              Sign in to approve access for this client (CLI or MCP).
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <SignInButton mode="modal">
@@ -85,8 +85,8 @@ export default async function McpAuthorizePage({
         <header className="flex items-baseline justify-between gap-4">
           <div>
             <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">OAUTH</p>
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Authorize MCP Client</h1>
-            <p className="mt-1 text-sm text-zinc-600">Grant an MCP client an API key for your selected memory scope.</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Authorize Client</h1>
+            <p className="mt-1 text-sm text-zinc-600">Grant a client (CLI or MCP) an API key for your selected memory scope.</p>
           </div>
           <Link
             href="/settings/tokens"
@@ -135,7 +135,7 @@ export default async function McpAuthorizePage({
             <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
               <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Consent</h2>
               <p className="mt-2 text-sm leading-6 text-zinc-600">
-                Approving will create an API key and return it to the MCP client via OAuth token exchange (PKCE).
+                Approving will create an API key and return it to the client via OAuth token exchange (PKCE).
               </p>
 
               <div className="mt-5 flex flex-col gap-3 sm:flex-row">
@@ -166,4 +166,3 @@ export default async function McpAuthorizePage({
     </div>
   );
 }
-

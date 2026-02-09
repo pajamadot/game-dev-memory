@@ -8,6 +8,8 @@ node_modules/
 out/
 dist/
 .wrangler/
+target/
+**/target/
 
 # Environment
 .env

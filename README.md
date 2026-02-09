@@ -5,9 +5,11 @@ Project memory infrastructure for game development AI agents. Enables agents to 
 ## Docs
 
 - `docs/architecture.md` - Target end-to-end architecture (Web + API + Neon/Hyperdrive + Clerk)
+- `docs/roadmap.md` - Evolution plan / next milestones
 - `docs/mvp-scope.md` - MVP checklist
 - `docs/deployment.md` - Vercel + Workers deployment wiring (CLI, correct root dirs)
 - `docs/api.md` - Current API usage (API keys, sessions, artifacts, MCP)
+- `docs/cli.md` - `pajama` CLI (Rust) + OAuth login flow
 
 ## Architecture
 
