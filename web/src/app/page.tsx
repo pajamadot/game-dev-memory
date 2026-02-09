@@ -85,6 +85,23 @@ function Pill(props: { children: React.ReactNode; tone?: "zinc" | "amber" | "eme
   return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${cls}`}>{props.children}</span>;
 }
 
+function scopeLabel(orgId: string | null): { label: string; badge: string; tone: "emerald" | "sky"; hint: string } {
+  if (orgId) {
+    return {
+      label: "Organization",
+      badge: "shared",
+      tone: "sky",
+      hint: "Shared project memory for your whole org.",
+    };
+  }
+  return {
+    label: "Personal",
+    badge: "private",
+    tone: "emerald",
+    hint: "Private memory visible only to you.",
+  };
+}
+
 function categoryTone(category: string): "zinc" | "amber" | "emerald" | "sky" {
   const c = category.toLowerCase();
   if (c.includes("bug") || c.includes("error")) return "amber";
@@ -94,7 +111,7 @@ function categoryTone(category: string): "zinc" | "amber" | "emerald" | "sky" {
 }
 
 export default async function Home() {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return (
@@ -105,11 +122,12 @@ export default async function Home() {
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">GAME DEV MEMORY</p>
                 <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
-                  A tenant-scoped memory graph for your agents.
+                  Shared project memory for teams, with a private personal layer.
                 </h1>
                 <p className="max-w-2xl text-sm leading-6 text-zinc-600">
-                  Capture session logs, build errors, playtest notes, and large artifacts. Retrieve fast by project,
-                  tags, and time, then evolve the system every session.
+                  Use <span className="font-medium text-zinc-900">Organization</span> scope for shared project memory across
+                  your team, and <span className="font-medium text-zinc-900">Personal</span> scope for notes that stay private.
+                  Capture session logs, build errors, playtest notes, and large artifacts; retrieve by project, tags, and time.
                 </p>
               </div>
 
@@ -128,25 +146,27 @@ export default async function Home() {
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                  <p className="text-xs font-semibold text-zinc-900">Sources</p>
-                  <p className="mt-1 text-xs leading-5 text-zinc-600">Agent logs, diffs, traces, errors, playtests, assets.</p>
+                  <p className="text-xs font-semibold text-zinc-900">Shared</p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-600">Org-scoped project memory shared by all members.</p>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                  <p className="text-xs font-semibold text-zinc-900">Retrieval</p>
-                  <p className="mt-1 text-xs leading-5 text-zinc-600">Project scoped now; semantic search later.</p>
+                  <p className="text-xs font-semibold text-zinc-900">Private</p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-600">Personal scope keeps memories private to you.</p>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                  <p className="text-xs font-semibold text-zinc-900">Storage</p>
+                  <p className="text-xs font-semibold text-zinc-900">Evidence</p>
                   <p className="mt-1 text-xs leading-5 text-zinc-600">Neon Postgres via Hyperdrive + R2 chunking.</p>
                 </div>
               </div>
             </div>
           </div>
-          <p className="mt-8 text-center text-xs text-zinc-500">Sign in to select personal or org scope.</p>
+          <p className="mt-8 text-center text-xs text-zinc-500">Sign in and use the org switcher to choose shared vs private scope.</p>
         </div>
       </div>
     );
   }
+
+  const scope = scopeLabel(orgId ?? null);
 
   let projects: Project[] = [];
   let sessions: Session[] = [];
@@ -177,10 +197,14 @@ export default async function Home() {
             <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">GAME DEV MEMORY</p>
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Memory Console</h1>
             <p className="mt-1 text-sm text-zinc-600">
-              Personal or org scoped. Neon (Hyperdrive) + R2. Agents evolve per session.
+              Project memory is <span className="font-medium text-zinc-900">shared</span> in org scope. Personal memory stays{" "}
+              <span className="font-medium text-zinc-900">private</span>.
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <Pill tone={scope.tone}>
+              {scope.label} · {scope.badge}
+            </Pill>
             <Link
               href="/research"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
@@ -207,6 +231,15 @@ export default async function Home() {
           </div>
         ) : null}
 
+        <div className="mt-6 rounded-2xl border border-zinc-200/70 bg-white/70 p-4 text-sm text-zinc-800 shadow-[0_1px_0_0_rgba(0,0,0,0.06)] backdrop-blur">
+          <p className="font-semibold text-zinc-950">
+            Scope: {scope.label} <span className="text-zinc-500">({scope.badge})</span>
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-600">
+            {scope.hint} Switch scope using the org switcher in the top right.
+          </p>
+        </div>
+
         <main className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-12">
           <div className="space-y-6 lg:col-span-4">
             <Card title="Projects" hint={`${projects.length} total`}>
@@ -221,7 +254,10 @@ export default async function Home() {
                           <p className="text-sm font-semibold text-zinc-950">{p.name}</p>
                           <p className="mt-1 text-xs text-zinc-600">{p.description || "No description"}</p>
                         </div>
-                        <Pill tone="sky">{p.engine}</Pill>
+                        <div className="flex flex-col items-end gap-2">
+                          <Pill tone={scope.tone}>{scope.badge}</Pill>
+                          <Pill tone="sky">{p.engine}</Pill>
+                        </div>
                       </div>
                       <div className="mt-3 flex items-center justify-between">
                         <p className="text-[11px] text-zinc-500">Updated {fmt(p.updated_at)}</p>
@@ -239,7 +275,7 @@ export default async function Home() {
               )}
             </Card>
 
-            <Card title="New project" hint="Tenant scoped">
+            <Card title="New project" hint={`${scope.label} scope · ${scope.badge}`}>
               <form action={createProject} className="space-y-3">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-zinc-700" htmlFor="project-name">
@@ -281,6 +317,10 @@ export default async function Home() {
                     />
                   </div>
                 </div>
+                <p className="text-xs leading-5 text-zinc-600">
+                  This project will be created in <span className="font-medium text-zinc-900">{scope.label}</span> scope:{" "}
+                  <span className="font-medium text-zinc-900">{scope.badge}</span>.
+                </p>
                 <button className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-zinc-900 text-sm font-medium text-white hover:bg-zinc-800">
                   Create project
                 </button>
@@ -325,7 +365,7 @@ export default async function Home() {
           </div>
 
           <div className="space-y-6 lg:col-span-8">
-            <Card title="New memory" hint="Write notes, bugs, decisions, patterns">
+            <Card title="New memory" hint={`${scope.label} scope · ${scope.badge}`}>
               {projects.length === 0 ? (
                 <p className="text-sm text-zinc-600">Create a project first.</p>
               ) : (
