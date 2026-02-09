@@ -32,6 +32,11 @@ function safeString(v: unknown): string {
   return "";
 }
 
+function stripHtmlTags(s: string): string {
+  // Feed titles sometimes contain basic HTML tags. Keep it simple.
+  return s.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
+
 function firstNonEmpty(...vals: unknown[]): string {
   for (const v of vals) {
     const s = safeString(v);
@@ -85,7 +90,7 @@ function parseRssOrAtom(xml: string, source: FeedSource): FeedItem[] {
   const channel = root?.rss?.channel;
   const rssItems = channel?.item ? (Array.isArray(channel.item) ? channel.item : [channel.item]) : [];
   for (const it of rssItems) {
-    const title = firstNonEmpty(it?.title, it?.["dc:title"]);
+    const title = stripHtmlTags(firstNonEmpty(it?.title, it?.["dc:title"]));
     const link = normalizeUrl(firstNonEmpty(it?.link, it?.guid?.["#text"], it?.guid));
     const pub = firstNonEmpty(it?.pubDate, it?.["dc:date"]);
     if (!title || !link) continue;
@@ -102,7 +107,7 @@ function parseRssOrAtom(xml: string, source: FeedSource): FeedItem[] {
   const feed = root?.feed;
   const entries = feed?.entry ? (Array.isArray(feed.entry) ? feed.entry : [feed.entry]) : [];
   for (const e of entries) {
-    const title = firstNonEmpty(e?.title?.["#text"], e?.title);
+    const title = stripHtmlTags(firstNonEmpty(e?.title?.["#text"], e?.title));
     const linkObj = e?.link;
     let link = "";
     if (typeof linkObj === "string") link = linkObj;
@@ -145,6 +150,31 @@ async function fetchFeed(source: FeedSource): Promise<FeedItem[]> {
 
   const xml = await res.text();
   return parseRssOrAtom(xml, source);
+}
+
+function selectDigestItems(all: FeedItem[], now: Date): FeedItem[] {
+  // Dedupe by URL.
+  const byUrl = new Map<string, FeedItem>();
+  for (const it of all) {
+    if (!it.url) continue;
+    const key = it.url.toLowerCase();
+    if (!byUrl.has(key)) byUrl.set(key, it);
+  }
+
+  const cutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000; // last 30 days
+
+  return [...byUrl.values()]
+    .filter((it) => {
+      if (!it.published_at) return false;
+      const t = Date.parse(it.published_at);
+      return Number.isFinite(t) && t >= cutoff;
+    })
+    .sort((a, b) => {
+      const at = a.published_at ? Date.parse(a.published_at) : 0;
+      const bt = b.published_at ? Date.parse(b.published_at) : 0;
+      return bt - at;
+    })
+    .slice(0, 25);
 }
 
 function renderDigestMarkdown(opts: { date: string; items: FeedItem[]; sources: FeedSource[] }): string {
@@ -311,21 +341,7 @@ export async function runUnrealAgentsDailyDigestForTenant(env: Env, tenant: Tena
     if (r.status === "fulfilled") all.push(...r.value);
   }
 
-  // Dedupe by URL.
-  const byUrl = new Map<string, FeedItem>();
-  for (const it of all) {
-    if (!it.url) continue;
-    const key = it.url.toLowerCase();
-    if (!byUrl.has(key)) byUrl.set(key, it);
-  }
-
-  const items = [...byUrl.values()]
-    .sort((a, b) => {
-      const at = a.published_at ? Date.parse(a.published_at) : 0;
-      const bt = b.published_at ? Date.parse(b.published_at) : 0;
-      return bt - at;
-    })
-    .slice(0, 25);
+  const items = selectDigestItems(all, date);
 
   const markdown = renderDigestMarkdown({ date: day, items, sources: FEEDS });
 
@@ -360,20 +376,7 @@ export async function runUnrealAgentsDailyDigestForAllTenants(env: Env, date: Da
     if (r.status === "fulfilled") all.push(...r.value);
   }
 
-  const byUrl = new Map<string, FeedItem>();
-  for (const it of all) {
-    if (!it.url) continue;
-    const key = it.url.toLowerCase();
-    if (!byUrl.has(key)) byUrl.set(key, it);
-  }
-
-  const items = [...byUrl.values()]
-    .sort((a, b) => {
-      const at = a.published_at ? Date.parse(a.published_at) : 0;
-      const bt = b.published_at ? Date.parse(b.published_at) : 0;
-      return bt - at;
-    })
-    .slice(0, 25);
+  const items = selectDigestItems(all, date);
 
   const nowIso = new Date().toISOString();
   const day = dayKeyUtc(date);
