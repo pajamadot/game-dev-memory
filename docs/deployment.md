@@ -77,6 +77,14 @@ cd api
 npx wrangler r2 bucket create game-dev-memory
 ```
 
+### OAuth Consent URL (MCP)
+
+MCP OAuth `/authorize` redirects to the web consent page using the Worker var:
+
+- `WEBSITE_URL`
+
+In production this should be `https://game-dev-memory.vercel.app`.
+
 ## Local Notes
 
 Wrangler emulates Hyperdrive with a local Postgres connection string:
