@@ -16,13 +16,23 @@ const EVENTS_PATH = process.env.EVOLVER_EVENTS_PATH
   ? path.resolve(ROOT_DIR, process.env.EVOLVER_EVENTS_PATH)
   : path.resolve(ROOT_DIR, ".data/events.jsonl");
 
-function tenantHeaders() {
+function authHeaders() {
+  const apiKey =
+    process.env.MEMORY_API_KEY ||
+    process.env.MEMORY_API_TOKEN ||
+    process.env.GDM_API_KEY ||
+    process.env.GDM_API_TOKEN ||
+    null;
+
+  if (apiKey) {
+    return { Authorization: `Bearer ${apiKey}` };
+  }
+
+  // Legacy fallback for local-only testing (requires ALLOW_INSECURE_TENANT_HEADERS=true in the Worker env).
   const tenantType = process.env.MEMORY_TENANT_TYPE;
   const tenantId = process.env.MEMORY_TENANT_ID;
   const actorId = process.env.MEMORY_ACTOR_ID || process.env.MEMORY_TENANT_ACTOR_ID || null;
-
   if (!tenantType || !tenantId) return {};
-
   return {
     "X-Tenant-Type": tenantType,
     "X-Tenant-Id": tenantId,
@@ -138,7 +148,7 @@ async function gatherSignals(apiUrl, projectId) {
 
   try {
     const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-    const res = await fetch(`${apiUrl}/api/evolve/signals${qs}`, { headers: tenantHeaders() });
+    const res = await fetch(`${apiUrl}/api/evolve/signals${qs}`, { headers: authHeaders() });
     if (!res.ok) {
       signals.push("api_unreachable");
       return signals;
@@ -233,20 +243,20 @@ async function executeMutation(mutation, apiUrl) {
 
 async function executeRepair(mutation, apiUrl) {
   // Fetch memories that may need repair
-  const res = await fetch(`${apiUrl}/api/memories?limit=100`, { headers: tenantHeaders() });
+  const res = await fetch(`${apiUrl}/api/memories?limit=100`, { headers: authHeaders() });
   const { memories } = await res.json();
 
   let repaired = 0;
   for (const memory of memories) {
     // Check for broken project references
-    const projRes = await fetch(`${apiUrl}/api/projects/${memory.project_id}`, { headers: tenantHeaders() });
+    const projRes = await fetch(`${apiUrl}/api/projects/${memory.project_id}`, { headers: authHeaders() });
     if (!projRes.ok) {
       // Mark orphaned memory with zero confidence
       const tags = normalizeTags(memory.tags);
       const context = normalizeContext(memory.context);
       await fetch(`${apiUrl}/api/memories/${memory.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...tenantHeaders() },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           ...memory,
           confidence: 0,
@@ -262,7 +272,7 @@ async function executeRepair(mutation, apiUrl) {
 }
 
 async function executeOptimize(mutation, apiUrl) {
-  const res = await fetch(`${apiUrl}/api/memories?limit=100`, { headers: tenantHeaders() });
+  const res = await fetch(`${apiUrl}/api/memories?limit=100`, { headers: authHeaders() });
   const { memories } = await res.json();
 
   let optimized = 0;
@@ -272,7 +282,7 @@ async function executeOptimize(mutation, apiUrl) {
       if (memory.access_count === 0 && memory.confidence < 0.3) {
         const age = Date.now() - new Date(memory.updated_at).getTime();
         if (age > 30 * 24 * 60 * 60 * 1000) {
-          await fetch(`${apiUrl}/api/memories/${memory.id}`, { method: "DELETE", headers: tenantHeaders() });
+          await fetch(`${apiUrl}/api/memories/${memory.id}`, { method: "DELETE", headers: authHeaders() });
           optimized++;
         }
       }
@@ -285,7 +295,7 @@ async function executeOptimize(mutation, apiUrl) {
         const context = normalizeContext(memory.context);
         await fetch(`${apiUrl}/api/memories/${memory.id}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json", ...tenantHeaders() },
+          headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({ ...memory, confidence: newConfidence, tags, context }),
         });
         optimized++;
@@ -314,7 +324,7 @@ async function executeInnovate(mutation, apiUrl) {
 async function apiJson(apiUrl, pathnameWithQuery, init = {}) {
   const res = await fetch(`${apiUrl}${pathnameWithQuery}`, {
     ...init,
-    headers: { ...(init.headers || {}), ...tenantHeaders() },
+    headers: { ...(init.headers || {}), ...authHeaders() },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -522,7 +532,7 @@ async function recordEventToApi(event, apiUrl) {
   try {
     await fetch(`${apiUrl}/api/evolve/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...tenantHeaders() },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         project_id: event.project_id || null,
         type: event.type,

@@ -1,33 +1,51 @@
-# API Usage (Current)
+# API Usage (Auth + Examples)
 
-The API is multi-tenant. Until Clerk auth is wired end-to-end, tenancy is passed via headers.
+The Memory API is the core of the system. MCP is a thin tool layer on top of it.
 
-## Tenancy Headers
+## Auth
 
-Required on most routes:
+All `/api/*` routes require:
 
-- `X-Tenant-Type`: `user` or `org`
-- `X-Tenant-Id`: tenant identifier (Clerk user id or Clerk org id)
+- `Authorization: Bearer <token>`
 
-Optional:
+Supported tokens:
 
-- `X-Actor-Id`: actor/user identifier (stored as `created_by` / `updated_by`)
+- API key (recommended for agents/services): `gdm_...`
+  - Create in the web app: `/settings/tokens`
+- Clerk session JWT (used by the web app)
+  - The Next.js app calls `auth().getToken()` and forwards it as `Authorization: Bearer ...`
 
-Example (PowerShell):
+### Local Escape Hatch (Not Recommended)
+
+For local-only testing, you can allow the legacy `X-Tenant-*` headers by setting:
+
+- `ALLOW_INSECURE_TENANT_HEADERS=true` in the Worker env
+
+Do not enable this in production.
+
+## PowerShell Examples (API Key)
 
 ```powershell
-$h = @{
-  "X-Tenant-Type" = "user"
-  "X-Tenant-Id" = "dev-user"
-  "X-Actor-Id" = "dev-user"
-}
+$api = "http://localhost:8787"
+$token = "gdm_your_api_key_here"
+$h = @{ Authorization = "Bearer $token" }
 
-Invoke-RestMethod "http://localhost:8787/api/projects" -Headers $h
+Invoke-RestMethod "$api/api/projects" -Headers $h
 ```
 
-## Sessions
+### Create Project
 
-Create a session (boundary for "auto evolve"):
+```powershell
+$body = @{
+  name = "UE5 Shooter Prototype"
+  engine = "unreal"
+  description = "Goals, constraints, pipeline notes"
+} | ConvertTo-Json
+
+Invoke-RestMethod "$api/api/projects" -Method Post -Headers $h -ContentType "application/json" -Body $body
+```
+
+### Create Session
 
 ```powershell
 $body = @{
@@ -36,55 +54,53 @@ $body = @{
   context = @{ branch = "main" }
 } | ConvertTo-Json
 
-Invoke-RestMethod "http://localhost:8787/api/sessions" -Method Post -Headers $h -ContentType "application/json" -Body $body
+Invoke-RestMethod "$api/api/sessions" -Method Post -Headers $h -ContentType "application/json" -Body $body
 ```
 
-Close a session:
+### Close Session (Auto-Evolve)
 
 ```powershell
-Invoke-RestMethod "http://localhost:8787/api/sessions/<session-uuid>/close" -Method Post -Headers $h
+Invoke-RestMethod "$api/api/sessions/<session-uuid>/close" -Method Post -Headers $h
 ```
 
-## Artifacts (R2)
-
-Create an artifact record:
+### Create Memory
 
 ```powershell
 $body = @{
   project_id = "<project-uuid>"
-  session_id = "<session-uuid>"
-  type = "ue_log"
-  storage_mode = "single" # or "chunked"
-  content_type = "text/plain"
-  metadata = @{ path = "Saved/Logs/Game.log" }
+  session_id = $null
+  category = "bug"
+  source_type = "manual"
+  title = "Fixed shader compile crash on DX12"
+  content = "Root cause + fix steps..."
+  tags = @("dx12","shader","crash")
+  context = @{ platform = "Win64" }
+  confidence = 0.7
 } | ConvertTo-Json
 
-Invoke-RestMethod "http://localhost:8787/api/artifacts" -Method Post -Headers $h -ContentType "application/json" -Body $body
+Invoke-RestMethod "$api/api/memories" -Method Post -Headers $h -ContentType "application/json" -Body $body
 ```
 
-Upload as a single object:
+## MCP (Thin Layer)
+
+MCP endpoint:
+
+- `POST /mcp`
+
+Auth is the same:
+
+- `Authorization: Bearer <gdm_...>`
+
+Example JSON-RPC:
 
 ```powershell
-$bytes = [System.IO.File]::ReadAllBytes("C:\\path\\to\\Game.log")
-Invoke-WebRequest "http://localhost:8787/api/artifacts/<artifact-uuid>/object" -Method Put -Headers $h -ContentType "text/plain" -Body $bytes
-```
+$mcp = "$api/mcp"
+$req = @{
+  jsonrpc = "2.0"
+  id = 1
+  method = "tools/list"
+} | ConvertTo-Json
 
-Upload chunked (repeat per chunk):
-
-```powershell
-$chunk = [System.IO.File]::ReadAllBytes("C:\\path\\chunk-000.bin")
-Invoke-WebRequest "http://localhost:8787/api/artifacts/<artifact-uuid>/chunks/0?byte_start=0&byte_end=1048575" -Method Put -Headers $h -ContentType "application/octet-stream" -Body $chunk
-```
-
-List chunks:
-
-```powershell
-Invoke-RestMethod "http://localhost:8787/api/artifacts/<artifact-uuid>/chunks" -Headers $h
-```
-
-Fetch a chunk:
-
-```powershell
-Invoke-WebRequest "http://localhost:8787/api/artifacts/<artifact-uuid>/chunks/0" -Headers $h -OutFile chunk.bin
+Invoke-RestMethod $mcp -Method Post -Headers $h -ContentType "application/json" -Body $req
 ```
 

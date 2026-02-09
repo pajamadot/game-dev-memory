@@ -127,7 +127,8 @@ export default async function Home() {
                 <p className="max-w-2xl text-sm leading-6 text-zinc-600">
                   Use <span className="font-medium text-zinc-900">Organization</span> scope for shared project memory across
                   your team, and <span className="font-medium text-zinc-900">Personal</span> scope for notes that stay private.
-                  Capture session logs, build errors, playtest notes, and large artifacts; retrieve by project, tags, and time.
+                  Auto sync your memory everywhere. Capture session logs, build errors, playtest notes, and large artifacts; retrieve
+                  by project, tags, and time.
                 </p>
               </div>
 
@@ -210,6 +211,12 @@ export default async function Home() {
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
               Team
+            </Link>
+            <Link
+              href="/settings/tokens"
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              API Keys
             </Link>
             <Link
               href="/research"

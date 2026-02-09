@@ -4,6 +4,17 @@ export interface Env {
   ENVIRONMENT: string;
   // Fallback for local execution/testing without a Hyperdrive binding.
   DATABASE_URL?: string;
+
+  // Clerk session JWT verification (JWKS).
+  // Example: https://clerk.your-domain.com/.well-known/jwks.json
+  CLERK_JWKS_URL?: string;
+
+  // Used by OAuth /authorize to redirect to the web consent page.
+  WEBSITE_URL?: string;
+
+  // Temporary escape hatch for local testing only.
+  // If true, allows X-Tenant-* headers when Authorization is missing.
+  ALLOW_INSECURE_TENANT_HEADERS?: string;
 }
 
 export interface Memory {

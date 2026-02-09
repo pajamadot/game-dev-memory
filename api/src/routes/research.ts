@@ -1,10 +1,10 @@
 import { Hono } from "hono";
-import type { Env } from "../types";
+import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
 import { runUnrealAgentsDailyDigestForTenant } from "../research/unrealAgents";
 
-export const researchRouter = new Hono<{ Bindings: Env }>();
+export const researchRouter = new Hono<AppEnv>();
 
 // List digests for the current tenant (across projects).
 researchRouter.get("/unreal-agents/digests", async (c) => {
@@ -45,4 +45,3 @@ researchRouter.post("/unreal-agents/run", async (c) => {
 
   return c.json({ ok: true, ...res });
 });
-

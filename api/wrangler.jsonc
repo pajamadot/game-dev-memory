@@ -14,7 +14,10 @@
   },
 
   "vars": {
-    "ENVIRONMENT": "development"
+    "ENVIRONMENT": "development",
+    "WEBSITE_URL": "http://localhost:3000",
+    "CLERK_JWKS_URL": "https://clerk.pajamadot.com/.well-known/jwks.json",
+    "ALLOW_INSECURE_TENANT_HEADERS": "false"
   },
 
   // Neon Postgres via Cloudflare Hyperdrive

@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { Env } from "../types";
+import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
 
-export const evolveRouter = new Hono<{ Bindings: Env }>();
+export const evolveRouter = new Hono<AppEnv>();
 
 // Get evolution history
 evolveRouter.get("/events", async (c) => {

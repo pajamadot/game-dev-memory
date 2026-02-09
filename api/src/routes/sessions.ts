@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { Env } from "../types";
+import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
 
-export const sessionsRouter = new Hono<{ Bindings: Env }>();
+export const sessionsRouter = new Hono<AppEnv>();
 
 function normalizeTags(v: unknown): string[] {
   if (!v) return [];

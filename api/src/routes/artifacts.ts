@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import type { Env } from "../types";
+import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
 
-function requireBucket(env: Env): R2Bucket {
+function requireBucket(env: AppEnv["Bindings"]): R2Bucket {
   if (!env.MEMORY_BUCKET) {
     throw new Error("R2 bucket binding missing. Configure MEMORY_BUCKET in wrangler.jsonc.");
   }
@@ -18,7 +18,7 @@ function buildArtifactPrefix(opts: { tenantType: string; tenantId: string; proje
   return `tenants/${t}/${tid}/projects/${pid}/artifacts/${aid}/`;
 }
 
-export const artifactsRouter = new Hono<{ Bindings: Env }>();
+export const artifactsRouter = new Hono<AppEnv>();
 
 // List artifacts with optional filters
 artifactsRouter.get("/", async (c) => {
@@ -397,4 +397,3 @@ artifactsRouter.get("/:id/object", async (c) => {
     },
   });
 });
-

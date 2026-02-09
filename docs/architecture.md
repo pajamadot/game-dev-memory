@@ -21,7 +21,7 @@ This document describes the target architecture and the current implementation g
 - `web/` (Next.js on Vercel)
 - `api/` (Cloudflare Workers + Hono)
 - DB: Neon Postgres via Cloudflare Hyperdrive
-- Auth: Clerk (users + orgs)
+- Auth: Clerk (web users + orgs) + API keys (agents/services)
 - Optional storage later: Cloudflare R2 for large artifacts (logs, traces, screenshots), with metadata in Postgres
 - `skills/` includes a local evolver runner (Node) for agentic coding sessions
 
@@ -193,8 +193,8 @@ Source of truth for identity:
 
 Rules:
 
-- All DB rows include `org_id`.
-- Every query filters by `org_id`.
+- All DB rows include `tenant_type` + `tenant_id` (`user` or `org`).
+- Every query filters by `tenant_type` + `tenant_id`.
 - Writes store `created_by` and `updated_by`.
 - Cross-project search never crosses org boundaries.
 

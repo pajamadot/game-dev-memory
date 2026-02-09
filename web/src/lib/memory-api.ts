@@ -11,16 +11,14 @@ function baseUrl(): string {
 export type TenantHeaders = Record<string, string>;
 
 export async function clerkTenantHeaders(): Promise<TenantHeaders> {
-  const { userId, orgId } = await auth();
+  const { userId, getToken } = await auth();
   if (!userId) throw new Error("Not authenticated");
 
-  const tenantType = orgId ? "org" : "user";
-  const tenantId = orgId ?? userId;
+  const token = await getToken();
+  if (!token) throw new Error("Missing Clerk session token");
 
   return {
-    "X-Tenant-Type": tenantType,
-    "X-Tenant-Id": tenantId,
-    "X-Actor-Id": userId,
+    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -44,4 +42,3 @@ export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
 
   return (await res.json()) as T;
 }
-
