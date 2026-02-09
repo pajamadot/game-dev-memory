@@ -30,8 +30,13 @@ npx vercel link
 To deploy:
 
 ```bash
+# If you're inside web/ (and the Vercel project Root Directory is also "web"),
+# deploy the repo root so Vercel resolves Root Directory correctly:
 cd web
-npx vercel --prod
+npx vercel deploy .. --prod --yes
+
+# Alternatively deploy from the repo root:
+# npx vercel --prod --yes
 ```
 
 ### Environment Variables (Vercel)
