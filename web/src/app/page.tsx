@@ -1,5 +1,6 @@
 import { OrganizationSwitcher, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
+import Link from "next/link";
 import { apiJson } from "@/lib/memory-api";
 import { closeSession, createMemory, createProject, startSession } from "./actions";
 
@@ -180,6 +181,12 @@ export default async function Home() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              href="/research/agent-memory"
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Research
+            </Link>
             <OrganizationSwitcher
               appearance={{
                 elements: {
@@ -464,4 +471,3 @@ export default async function Home() {
     </div>
   );
 }
-
