@@ -27,6 +27,12 @@ export default async function AgentMemoryResearchPage() {
           </div>
           <div className="flex items-center gap-2">
             <Link
+              href="/research"
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              All research
+            </Link>
+            <Link
               href="/"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
@@ -92,4 +98,3 @@ export default async function AgentMemoryResearchPage() {
     </div>
   );
 }
-
