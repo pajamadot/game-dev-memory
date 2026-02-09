@@ -81,6 +81,56 @@ $body = @{
 Invoke-RestMethod "$api/api/memories" -Method Post -Headers $h -ContentType "application/json" -Body $body
 ```
 
+## Assets (Large Files, R2 Multipart)
+
+Use assets for large binary files you want to reference from memories (zips, builds, pak files, crash dumps, captures).
+
+Flow:
+
+1. `POST /api/assets` to create the asset record + initiate an R2 multipart upload.
+2. Upload parts via `PUT /api/assets/{assetId}/parts/{partNumber}` (1-indexed).
+3. `POST /api/assets/{assetId}/complete` to finalize into a single R2 object.
+
+Notes:
+
+- Each part must be at least 5MB (except the last).
+- For safety with Cloudflare Workers request limits, keep parts <= ~95MB.
+- After completion, download via `GET /api/assets/{assetId}/object` (supports `byte_start`/`byte_end` for ranged reads).
+
+### Create Asset (Initiate Upload)
+
+```powershell
+$body = @{
+  project_id = "<project-uuid>"
+  original_name = "Saved\\Builds\\Win64.zip"
+  content_type = "application/zip"
+  byte_size = 10737418240 # 10GB (optional but recommended)
+  memory_id = "<memory-uuid>" # optional: auto-link as attachment
+} | ConvertTo-Json
+
+$asset = Invoke-RestMethod "$api/api/assets" -Method Post -Headers $h -ContentType "application/json" -Body $body
+$asset | ConvertTo-Json -Depth 10
+```
+
+### Upload One Part
+
+```powershell
+# Example: upload part 1
+$assetId = $asset.id
+$partNumber = 1
+
+# Read a part from disk (your client should slice the file into chunks)
+$bytes = [System.IO.File]::ReadAllBytes("C:\\path\\to\\part-1.bin")
+
+Invoke-RestMethod "$api/api/assets/$assetId/parts/$partNumber" -Method Put -Headers $h -Body $bytes -ContentType "application/octet-stream"
+```
+
+### Complete Upload
+
+```powershell
+Invoke-RestMethod "$api/api/assets/$assetId/complete" -Method Post -Headers $h -ContentType "application/json" -Body "{}"
+```
+
 ## MCP (Thin Layer)
 
 MCP endpoint:
@@ -103,4 +153,3 @@ $req = @{
 
 Invoke-RestMethod $mcp -Method Post -Headers $h -ContentType "application/json" -Body $req
 ```
-
