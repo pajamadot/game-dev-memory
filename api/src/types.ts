@@ -1,5 +1,6 @@
 export interface Env {
   HYPERDRIVE?: Hyperdrive;
+  MEMORY_BUCKET?: R2Bucket;
   ENVIRONMENT: string;
   // Fallback for local execution/testing without a Hyperdrive binding.
   DATABASE_URL?: string;

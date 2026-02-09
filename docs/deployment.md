@@ -58,6 +58,19 @@ npx wrangler deploy
 
 - `HYPERDRIVE` -> `bf4313a26dc64a7080f23b9932a4c8a0` (name: `game-dev-memory-neon-db`)
 
+### R2 Bucket (Artifacts)
+
+`api/wrangler.jsonc` binds:
+
+- `MEMORY_BUCKET` -> `game-dev-memory`
+
+Create it if needed:
+
+```bash
+cd api
+npx wrangler r2 bucket create game-dev-memory
+```
+
 ## Local Notes
 
 Wrangler emulates Hyperdrive with a local Postgres connection string:

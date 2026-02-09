@@ -6,7 +6,8 @@ Project memory infrastructure for game development AI agents. Enables agents to 
 
 - `docs/architecture.md` - Target end-to-end architecture (Web + API + Neon/Hyperdrive + Clerk)
 - `docs/mvp-scope.md` - MVP checklist
-- `docs/deployment.md` - Vercel + Workers deployment wiring (root dirs + required GitHub secrets)
+- `docs/deployment.md` - Vercel + Workers deployment wiring (CLI, correct root dirs)
+- `docs/api.md` - Current API usage (tenant headers, sessions, artifacts)
 
 ## Architecture
 

@@ -29,5 +29,16 @@
       "binding": "HYPERDRIVE",
       "id": "bf4313a26dc64a7080f23b9932a4c8a0"
     }
+  ],
+
+  // R2 bucket for large artifacts (logs, traces, screenshots, etc.)
+  //
+  // Create it if it doesn't exist:
+  //   npx wrangler r2 bucket create game-dev-memory
+  "r2_buckets": [
+    {
+      "binding": "MEMORY_BUCKET",
+      "bucket_name": "game-dev-memory"
+    }
   ]
 }

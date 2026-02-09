@@ -13,6 +13,20 @@ const GENES_PATH = path.resolve(__dirname, "../assets/genes/genes.json");
 const CAPSULES_PATH = path.resolve(__dirname, "../assets/genes/capsules.json");
 const EVENTS_PATH = path.resolve(__dirname, "../assets/genes/events.jsonl");
 
+function tenantHeaders() {
+  const tenantType = process.env.MEMORY_TENANT_TYPE;
+  const tenantId = process.env.MEMORY_TENANT_ID;
+  const actorId = process.env.MEMORY_ACTOR_ID || process.env.MEMORY_TENANT_ACTOR_ID || null;
+
+  if (!tenantType || !tenantId) return {};
+
+  return {
+    "X-Tenant-Type": tenantType,
+    "X-Tenant-Id": tenantId,
+    ...(actorId ? { "X-Actor-Id": actorId } : {}),
+  };
+}
+
 function normalizeTags(tags) {
   if (!tags) return [];
   if (Array.isArray(tags)) return tags.filter((t) => typeof t === "string");
@@ -119,7 +133,8 @@ async function gatherSignals(apiUrl, projectId) {
   const signals = [];
 
   try {
-    const res = await fetch(`${apiUrl}/api/evolve/signals`);
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+    const res = await fetch(`${apiUrl}/api/evolve/signals${qs}`, { headers: tenantHeaders() });
     if (!res.ok) {
       signals.push("api_unreachable");
       return signals;
@@ -214,20 +229,20 @@ async function executeMutation(mutation, apiUrl) {
 
 async function executeRepair(mutation, apiUrl) {
   // Fetch memories that may need repair
-  const res = await fetch(`${apiUrl}/api/memories?limit=100`);
+  const res = await fetch(`${apiUrl}/api/memories?limit=100`, { headers: tenantHeaders() });
   const { memories } = await res.json();
 
   let repaired = 0;
   for (const memory of memories) {
     // Check for broken project references
-    const projRes = await fetch(`${apiUrl}/api/projects/${memory.project_id}`);
+    const projRes = await fetch(`${apiUrl}/api/projects/${memory.project_id}`, { headers: tenantHeaders() });
     if (!projRes.ok) {
       // Mark orphaned memory with zero confidence
       const tags = normalizeTags(memory.tags);
       const context = normalizeContext(memory.context);
       await fetch(`${apiUrl}/api/memories/${memory.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...tenantHeaders() },
         body: JSON.stringify({
           ...memory,
           confidence: 0,
@@ -243,7 +258,7 @@ async function executeRepair(mutation, apiUrl) {
 }
 
 async function executeOptimize(mutation, apiUrl) {
-  const res = await fetch(`${apiUrl}/api/memories?limit=100`);
+  const res = await fetch(`${apiUrl}/api/memories?limit=100`, { headers: tenantHeaders() });
   const { memories } = await res.json();
 
   let optimized = 0;
@@ -253,7 +268,7 @@ async function executeOptimize(mutation, apiUrl) {
       if (memory.access_count === 0 && memory.confidence < 0.3) {
         const age = Date.now() - new Date(memory.updated_at).getTime();
         if (age > 30 * 24 * 60 * 60 * 1000) {
-          await fetch(`${apiUrl}/api/memories/${memory.id}`, { method: "DELETE" });
+          await fetch(`${apiUrl}/api/memories/${memory.id}`, { method: "DELETE", headers: tenantHeaders() });
           optimized++;
         }
       }
@@ -266,7 +281,7 @@ async function executeOptimize(mutation, apiUrl) {
         const context = normalizeContext(memory.context);
         await fetch(`${apiUrl}/api/memories/${memory.id}`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...tenantHeaders() },
           body: JSON.stringify({ ...memory, confidence: newConfidence, tags, context }),
         });
         optimized++;
@@ -305,7 +320,7 @@ async function recordEventToApi(event, apiUrl) {
   try {
     await fetch(`${apiUrl}/api/evolve/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...tenantHeaders() },
       body: JSON.stringify({
         type: event.type,
         parent_id: null,
