@@ -55,6 +55,12 @@ Triggered by opportunity signals:
 /evolve-memory --project=<project-id>
 ```
 
+### 100-Round Loop (Hands-Off)
+Run up to 100 cycles in a single process (the loop also self-recycles on high RSS):
+```
+node index.js --loop --cycles=100
+```
+
 ## Gene Protocol
 
 Evolution is driven by reusable "genes" - structured templates that encode specific improvement strategies:

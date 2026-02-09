@@ -6,6 +6,7 @@
  *   node index.js                    # Single evolution cycle (auto mode)
  *   node index.js --review           # Human-in-the-loop review
  *   node index.js --loop             # Continuous evolution daemon
+ *   node index.js --loop --cycles=100 # Stop after N cycles (process recycling still applies)
  *   node index.js --project=<id>     # Target specific project
  *   node index.js solidify           # Persist evolved capabilities
  *   node index.js solidify --dry-run # Preview without persisting
@@ -53,6 +54,7 @@ async function main() {
 async function runLoop(flags) {
   let cycles = 0;
   let sleepMs = DEFAULTS.MIN_SLEEP_MS;
+  const maxCycles = parseInt(flags.cycles || flags["max-cycles"] || DEFAULTS.MAX_CYCLES);
 
   console.log("[memory-evolver] Starting continuous evolution loop");
 
@@ -61,7 +63,7 @@ async function runLoop(flags) {
 
     // Memory leak protection
     const rss = process.memoryUsage().rss / 1024 / 1024;
-    if (rss > DEFAULTS.MAX_RSS_MB || cycles > DEFAULTS.MAX_CYCLES) {
+    if (rss > DEFAULTS.MAX_RSS_MB || (Number.isFinite(maxCycles) && maxCycles > 0 && cycles > maxCycles)) {
       console.log(`[memory-evolver] Recycling process (rss=${rss.toFixed(1)}MB, cycles=${cycles})`);
       process.exit(0);
     }
