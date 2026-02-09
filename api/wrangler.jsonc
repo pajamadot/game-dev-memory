@@ -15,7 +15,9 @@
 
   "vars": {
     "ENVIRONMENT": "development",
-    "WEBSITE_URL": "http://localhost:3000",
+    // Deployed web app (OAuth consent UI).
+    // For local development, override via `wrangler dev --var WEBSITE_URL=http://localhost:3000`.
+    "WEBSITE_URL": "https://game-dev-memory.vercel.app",
     "CLERK_JWKS_URL": "https://clerk.pajamadot.com/.well-known/jwks.json",
     "ALLOW_INSECURE_TENANT_HEADERS": "false"
   },
