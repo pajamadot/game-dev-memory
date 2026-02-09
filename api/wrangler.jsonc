@@ -7,6 +7,12 @@
   "compatibility_date": "2026-02-08",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Daily research cron (runs scheduled() handler).
+  // Default: 09:00 UTC (adjust as needed).
+  "triggers": {
+    "crons": ["0 9 * * *"]
+  },
+
   "vars": {
     "ENVIRONMENT": "development"
   },
