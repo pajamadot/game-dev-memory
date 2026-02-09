@@ -7,7 +7,7 @@ Project memory infrastructure for game development AI agents. Enables agents to 
 - `docs/architecture.md` - Target end-to-end architecture (Web + API + Neon/Hyperdrive + Clerk)
 - `docs/mvp-scope.md` - MVP checklist
 - `docs/deployment.md` - Vercel + Workers deployment wiring (CLI, correct root dirs)
-- `docs/api.md` - Current API usage (tenant headers, sessions, artifacts)
+- `docs/api.md` - Current API usage (API keys, sessions, artifacts, MCP)
 
 ## Architecture
 
@@ -36,7 +36,13 @@ Next.js app for browsing and managing game dev memories. Visualize project knowl
 ### `api/` - Memory API
 Cloudflare Workers API powered by Hono. Handles memory CRUD, retrieval, and evolution.
 
-Persistence is Neon Postgres via Cloudflare Hyperdrive (multi-tenant org + project scoping via Clerk).
+Persistence is Neon Postgres via Cloudflare Hyperdrive.
+
+Auth model:
+- Web uses Clerk for login + org invites.
+- Web can dispatch API keys at `/settings/tokens`.
+- Agents/services use `Authorization: Bearer gdm_...`.
+- MCP (`/mcp`) is a thin tool layer over the Memory API, with OAuth endpoints for clients that prefer PKCE.
 
 ### `skills/` - Agent Skills
 Claude Code skills that power the self-evolving memory system. The `memory-evolver` skill continuously analyzes, optimizes, and grows the knowledge base.
