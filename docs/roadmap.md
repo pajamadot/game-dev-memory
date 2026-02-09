@@ -27,6 +27,18 @@ Success criteria:
 - A user can run `pajama login`, approve in the web UI, and immediately run `pajama projects list`.
 - A user can upload a multi-GB asset via multipart and link it to a memory.
 
+### 2) E2E UX Tests (Playwright + Optional Cloud Runner)
+
+Goal: prevent UX regressions in the web console and OAuth flow.
+
+- Add Playwright smoke tests for the logged-out UX (landing page, research, OAuth consent, settings).
+- Extend to logged-in flows once we standardize Clerk test credentials and stable selectors.
+- Optional: Cloudflare Browser Rendering + Puppeteer runner for scheduled smoke checks and screenshot capture, writing failures into memory.
+
+See:
+
+- `docs/e2e.md`
+
 ### 2) Scopes and Access Control Hardening
 
 Currently we store token scopes but do not enforce them everywhere.
@@ -43,4 +55,3 @@ Currently we store token scopes but do not enforce them everywhere.
 
 - Add UE log ingestion helpers that summarize into memories and store raw files as assets.
 - Keep raw ingestion optional; prefer derived summaries for the memory core.
-

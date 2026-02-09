@@ -10,6 +10,7 @@ Project memory infrastructure for game development AI agents. Enables agents to 
 - `docs/deployment.md` - Vercel + Workers deployment wiring (CLI, correct root dirs)
 - `docs/api.md` - Current API usage (API keys, sessions, artifacts, MCP)
 - `docs/cli.md` - `pajama` CLI (Rust) + OAuth login flow
+- `docs/e2e.md` - E2E UX tests (Playwright) + optional cloud runner
 
 ## Architecture
 
