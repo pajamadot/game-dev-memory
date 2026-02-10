@@ -165,10 +165,12 @@ Today the system already supports the core primitives:
 
 - `projects` (tenant-scoped)
 - `sessions` (the evolution boundary)
-- `memories` (typed text entries)
-- `artifacts` + `artifact_chunks` (R2-backed, partial retrieval)
+- `memories` (typed text entries with lifecycle + quality flags + Postgres FTS)
+- `assets` (R2-backed large files with multipart upload + range download)
+- `artifacts` + `artifact_chunks` (R2-backed, partial retrieval for chunked text/logs)
 - `entity_links` (generic evidence/relationship edges)
-- `evolution_events` (audit log)
+- `evolution_events` (evolution/audit log)
+- `memory_events` (fine-grained audit trail for memory edits/links/lifecycle)
 
 And now includes a first-cut **Project Memory Agent**:
 
@@ -182,7 +184,7 @@ The most important missing piece for "semantic search" is an embeddings index. M
 
 ## Recommended Next Steps
 
-1. Add Postgres full-text search for `memories` and chunk text, and expose a hybrid ranking API (FTS + recency first).
+1. Extend retrieval beyond memories: add FTS for chunk text / asset text previews, and keep a stable hybrid ranking (FTS + recency + quality/confidence) with lifecycle filtering.
 2. Add optional embeddings and hybrid retrieval (FTS + vector similarity), with tenant/project filters as hard constraints.
 3. Expand the `/agent` control UI with "Save as memory" (turn answers into durable semantic/procedural memories).
 4. Expand the `/agent` control UI with evidence deep links (memory + asset viewers).
