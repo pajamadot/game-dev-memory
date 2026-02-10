@@ -38,9 +38,16 @@ export default function ResearchIndexPage() {
               Unreal Engine + AI agent workflows, plus daily cron-generated digests.
             </p>
           </Link>
+
+          <Link
+            href="/research/pageindex"
+            className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur hover:bg-white"
+          >
+            <p className="text-sm font-semibold text-zinc-950">PageIndex</p>
+            <p className="mt-1 text-sm text-zinc-600">Document indexing for long specs/manuals (TOC-like tree + section retrieval).</p>
+          </Link>
         </main>
       </div>
     </div>
   );
 }
-

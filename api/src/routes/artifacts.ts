@@ -2,6 +2,18 @@ import { Hono } from "hono";
 import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
+import { anthropicMessages } from "../agent/anthropic";
+import {
+  buildChunkPageIndex,
+  buildMarkdownPageIndex,
+  countNodes,
+  countTokens,
+  mdToTree,
+  pageIndexFromPages,
+  searchPageIndex,
+  type PageIndexLlm,
+  type PageIndexNode,
+} from "../../../packages/pageindex-ts/src/index";
 
 function requireBucket(env: AppEnv["Bindings"]): R2Bucket {
   if (!env.MEMORY_BUCKET) {
@@ -19,6 +31,84 @@ function buildArtifactPrefix(opts: { tenantType: string; tenantId: string; proje
 }
 
 export const artifactsRouter = new Hono<AppEnv>();
+
+type StoredPageIndex = {
+  version: 1 | 2;
+  kind: "markdown" | "chunks" | "pageindex_md" | "pageindex_pdf";
+  built_at: string;
+  node_count: number;
+  roots: PageIndexNode[];
+  doc?: any;
+  source: {
+    storage_mode: string;
+    content_type: string;
+    byte_size: number;
+    r2_key: string | null;
+  };
+};
+
+function pageIndexLlmFromEnv(env: AppEnv["Bindings"]): PageIndexLlm {
+  return {
+    complete: async (opts) => {
+      const history = Array.isArray(opts.chat_history) ? opts.chat_history : [];
+      const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+      for (const m of history) {
+        if (!m || typeof m !== "object") continue;
+        const role = (m as any).role === "assistant" ? "assistant" : "user";
+        const content = typeof (m as any).content === "string" ? String((m as any).content) : "";
+        if (content) messages.push({ role, content });
+      }
+
+      messages.push({ role: "user", content: String(opts.prompt || "") });
+
+      const res = await anthropicMessages(env as any, {
+        system: "",
+        messages,
+        maxTokens: typeof opts.max_tokens === "number" ? Math.trunc(opts.max_tokens) : 4096,
+      });
+
+      const stopReason = (res as any).stopReason as string | null | undefined;
+      const finish_reason = stopReason === "max_tokens" ? "max_output_reached" : "finished";
+
+      return { text: res.text, finish_reason };
+    },
+  };
+}
+
+function clampInt(v: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function parseJsonMaybe(v: unknown): any {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "object") return v;
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s) return null;
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function isTextContentType(ct: unknown): boolean {
+  const s = typeof ct === "string" ? ct.toLowerCase().trim() : "";
+  if (!s) return false;
+  return (
+    s.startsWith("text/") ||
+    s.includes("markdown") ||
+    s.includes("json") ||
+    s.includes("xml") ||
+    s.includes("yaml") ||
+    s.includes("yml")
+  );
+}
 
 // List artifacts with optional filters
 artifactsRouter.get("/", async (c) => {
@@ -395,5 +485,264 @@ artifactsRouter.get("/:id/object", async (c) => {
     headers: {
       "content-type": artifact.content_type || "application/octet-stream",
     },
+  });
+});
+
+// PageIndex (TS port): store a hierarchical index in artifact.metadata.pageindex.
+// This is a pragmatic bridge between "artifact text" and retrieval-first agents.
+
+// Get stored pageindex metadata (if any)
+artifactsRouter.get("/:id/pageindex", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const id = c.req.param("id");
+
+  const artifact = await withDbClient(c.env, async (db) => {
+    const { rows } = await db.query("SELECT id, project_id, metadata FROM artifacts WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+      id,
+      tenantType,
+      tenantId,
+    ]);
+    return rows[0] ?? null;
+  });
+
+  if (!artifact) return c.json({ error: "Artifact not found" }, 404);
+  const meta = parseJsonMaybe((artifact as any).metadata) || {};
+  const pageindex = meta.pageindex || null;
+  if (!pageindex) return c.json({ error: "No pageindex for artifact" }, 404);
+
+  return c.json({ ok: true, artifact_id: String((artifact as any).id), project_id: String((artifact as any).project_id), pageindex });
+});
+
+// Build/rebuild a pageindex for an artifact.
+//
+// Body:
+// - kind: "auto" | "markdown" | "chunks" (default "auto")
+// - markdown: optional markdown content override (string)
+// - max_nodes: cap for markdown heading extraction (default 5000)
+// - excerpt_chars: per-node excerpt size (default 800)
+artifactsRouter.post("/:id/pageindex", async (c) => {
+  const { tenantType, tenantId, actorId } = requireTenant(c);
+  const id = c.req.param("id");
+  const bucket = requireBucket(c.env);
+  const body = await c.req.json().catch(() => ({}));
+
+  const kindRaw = typeof body.kind === "string" ? body.kind.trim().toLowerCase() : "auto";
+  const kindKey = kindRaw.replace(/-/g, "_");
+  const kind: "auto" | "markdown" | "chunks" | "pageindex_md" | "pageindex_pdf" =
+    kindKey === "markdown" || kindKey === "chunks" || kindKey === "pageindex_md" || kindKey === "pageindex_pdf"
+      ? (kindKey as any)
+      : "auto";
+  const maxNodes = clampInt(body.max_nodes, 5000, 1, 50_000);
+  const excerptChars = clampInt(body.excerpt_chars, 800, 80, 8000);
+  const markdownOverride = typeof body.markdown === "string" && body.markdown.trim() ? String(body.markdown) : null;
+
+  const artifact = await withDbClient(c.env, async (db) => {
+    const { rows } = await db.query("SELECT * FROM artifacts WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+      id,
+      tenantType,
+      tenantId,
+    ]);
+    return rows[0] ?? null;
+  });
+
+  if (!artifact) return c.json({ error: "Artifact not found" }, 404);
+
+  let markdownText: string | null = null;
+  let chunkTexts: Array<{ chunk_index: number; text: string; title?: string | null }> = [];
+
+  if (markdownOverride) {
+    markdownText = markdownOverride;
+  } else if ((artifact as any).r2_key && isTextContentType((artifact as any).content_type)) {
+    const obj = await bucket.get(String((artifact as any).r2_key));
+    if (!obj) return c.json({ error: "R2 object not found for artifact" }, 404);
+    markdownText = await obj.text();
+  } else {
+    chunkTexts = await withDbClient(c.env, async (db) => {
+      const { rows } = await db.query(
+        "SELECT chunk_index, text, metadata FROM artifact_chunks WHERE artifact_id = $1 AND text IS NOT NULL ORDER BY chunk_index ASC",
+        [id]
+      );
+      return rows.map((r: any) => {
+        const meta = parseJsonMaybe(r.metadata) || {};
+        const title = typeof meta.title === "string" && meta.title.trim() ? meta.title.trim() : null;
+        return { chunk_index: Number(r.chunk_index), text: String(r.text || ""), title };
+      });
+    });
+  }
+
+  let roots: PageIndexNode[] = [];
+  let doc: any = null;
+  let finalKind: StoredPageIndex["kind"] = "chunks";
+  let storedVersion: StoredPageIndex["version"] = 1;
+
+  const llm = pageIndexLlmFromEnv(c.env);
+  const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : String(c.env.ANTHROPIC_MODEL || "claude");
+
+  if (kind === "pageindex_md") {
+    const src = markdownText ?? (chunkTexts.length ? chunkTexts.map((c) => c.text).join("\n\n") : "");
+    if (!src.trim()) return c.json({ error: "No text available to index (provide markdown or upload text chunks)" }, 400);
+
+    const ifAddNodeSummary = typeof body.if_add_node_summary === "string" ? body.if_add_node_summary : "yes";
+    const ifAddDocDescription = typeof body.if_add_doc_description === "string" ? body.if_add_doc_description : "no";
+    const ifAddNodeText = typeof body.if_add_node_text === "string" ? body.if_add_node_text : "no";
+    const ifAddNodeId = typeof body.if_add_node_id === "string" ? body.if_add_node_id : "yes";
+    const ifThinning = typeof body.if_thinning === "boolean" ? body.if_thinning : String(body.if_thinning || "").toLowerCase() === "yes";
+    const thinningThreshold = clampInt(body.thinning_threshold, 5000, 0, 500_000);
+    const summaryTokenThreshold = clampInt(body.summary_token_threshold, 200, 1, 200_000);
+
+    doc = await mdToTree({
+      markdown: src,
+      doc_name: String((artifact as any).type || "Document"),
+      if_thinning: ifThinning,
+      min_token_threshold: thinningThreshold,
+      if_add_node_summary: String(ifAddNodeSummary).toLowerCase() === "yes" ? "yes" : "no",
+      summary_token_threshold: summaryTokenThreshold,
+      model,
+      if_add_doc_description: String(ifAddDocDescription).toLowerCase() === "yes" ? "yes" : "no",
+      if_add_node_text: String(ifAddNodeText).toLowerCase() === "yes" ? "yes" : "no",
+      if_add_node_id: String(ifAddNodeId).toLowerCase() === "yes" ? "yes" : "no",
+      llm,
+    });
+
+    roots = Array.isArray(doc.structure) ? (doc.structure as PageIndexNode[]) : [];
+    finalKind = "pageindex_md";
+    storedVersion = 2;
+  } else if (kind === "pageindex_pdf") {
+    // We don't parse raw PDFs in the Worker. Instead we rely on extracted per-chunk/per-page text.
+    const pages = chunkTexts.length
+      ? chunkTexts.map((c) => [String(c.text || ""), countTokens(String(c.text || ""), model)] as [string, number])
+      : markdownText
+        ? [[markdownText, countTokens(markdownText, model)] as [string, number]]
+        : [];
+
+    if (pages.length === 0) return c.json({ error: "No text available to index as pages (upload extracted text chunks first)" }, 400);
+
+    const user_opt: any = {};
+    if (typeof body.toc_check_page_num !== "undefined") user_opt.toc_check_page_num = clampInt(body.toc_check_page_num, 20, 1, 200);
+    if (typeof body.max_page_num_each_node !== "undefined") user_opt.max_page_num_each_node = clampInt(body.max_page_num_each_node, 10, 1, 500);
+    if (typeof body.max_token_num_each_node !== "undefined") user_opt.max_token_num_each_node = clampInt(body.max_token_num_each_node, 20000, 100, 5_000_000);
+    if (typeof body.if_add_node_id === "string") user_opt.if_add_node_id = String(body.if_add_node_id).toLowerCase() === "yes" ? "yes" : "no";
+    if (typeof body.if_add_node_summary === "string") user_opt.if_add_node_summary = String(body.if_add_node_summary).toLowerCase() === "yes" ? "yes" : "no";
+    if (typeof body.if_add_doc_description === "string") user_opt.if_add_doc_description = String(body.if_add_doc_description).toLowerCase() === "yes" ? "yes" : "no";
+    if (typeof body.if_add_node_text === "string") user_opt.if_add_node_text = String(body.if_add_node_text).toLowerCase() === "yes" ? "yes" : "no";
+    user_opt.model = model;
+
+    doc = await pageIndexFromPages({
+      llm,
+      page_list: pages,
+      doc_name: String((artifact as any).type || "Document"),
+      user_opt,
+    });
+
+    roots = Array.isArray(doc.structure) ? (doc.structure as PageIndexNode[]) : [];
+    finalKind = "pageindex_pdf";
+    storedVersion = 2;
+  } else if (kind === "markdown" || kind === "auto") {
+    const src = markdownText ?? (chunkTexts.length ? chunkTexts.map((c) => c.text).join("\n\n") : "");
+    if (src.trim()) {
+      const mdRoots = buildMarkdownPageIndex(src, { maxNodes, excerptChars });
+      if (mdRoots.length > 0) {
+        roots = mdRoots;
+        finalKind = "markdown";
+      }
+    }
+  }
+
+  if (roots.length === 0) {
+    if (!chunkTexts.length) {
+      if (markdownText && markdownText.trim()) {
+        roots = buildChunkPageIndex([{ chunk_index: 0, text: markdownText, title: String((artifact as any).type || "Document") }], {
+          excerptChars,
+          rootTitle: String((artifact as any).type || "Document"),
+        });
+        finalKind = "chunks";
+      } else {
+        return c.json({ error: "No text available to index (provide markdown or upload text chunks)" }, 400);
+      }
+    } else {
+      roots = buildChunkPageIndex(chunkTexts, { excerptChars, rootTitle: String((artifact as any).type || "Document") });
+      finalKind = "chunks";
+    }
+  }
+
+  const now = new Date().toISOString();
+  const stored: StoredPageIndex = {
+    version: storedVersion,
+    kind: finalKind,
+    built_at: now,
+    node_count: countNodes(roots),
+    roots,
+    doc: doc || undefined,
+    source: {
+      storage_mode: String((artifact as any).storage_mode || ""),
+      content_type: String((artifact as any).content_type || ""),
+      byte_size: Number((artifact as any).byte_size || 0),
+      r2_key: (artifact as any).r2_key ? String((artifact as any).r2_key) : null,
+    },
+  };
+
+  await withDbClient(c.env, async (db) => {
+    await db.query(
+      `UPDATE artifacts
+       SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{pageindex}', $1::jsonb, true)
+       WHERE id = $2 AND tenant_type = $3 AND tenant_id = $4`,
+      [JSON.stringify(stored), id, tenantType, tenantId]
+    );
+
+    // Record an evolution event for auditability (cheap + human-visible).
+    await db.query(
+      `INSERT INTO evolution_events (
+         id, tenant_type, tenant_id, project_id, session_id,
+         type, parent_id, description, changes, result, created_at, created_by
+       )
+       VALUES ($1, $2, $3, $4, NULL, 'optimize', NULL, $5, $6::jsonb, 'success', $7, $8)`,
+      [
+        crypto.randomUUID(),
+        tenantType,
+        tenantId,
+        String((artifact as any).project_id),
+        `Built artifact pageindex (${finalKind})`,
+        JSON.stringify({ artifact_id: id, kind: finalKind, node_count: stored.node_count }),
+        now,
+        actorId,
+      ]
+    );
+  });
+
+  return c.json({ ok: true, artifact_id: id, project_id: String((artifact as any).project_id), pageindex: stored });
+});
+
+// Query stored pageindex with a cheap deterministic scorer.
+artifactsRouter.get("/:id/pageindex/query", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const id = c.req.param("id");
+
+  const q = (c.req.query("q") || "").trim();
+  if (!q) return c.json({ error: "q is required" }, 400);
+
+  const limit = clampInt(c.req.query("limit"), 12, 1, 200);
+
+  const artifact = await withDbClient(c.env, async (db) => {
+    const { rows } = await db.query("SELECT id, project_id, metadata FROM artifacts WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+      id,
+      tenantType,
+      tenantId,
+    ]);
+    return rows[0] ?? null;
+  });
+
+  if (!artifact) return c.json({ error: "Artifact not found" }, 404);
+  const meta = parseJsonMaybe((artifact as any).metadata) || {};
+  const pageindex = meta.pageindex as StoredPageIndex | undefined;
+  if (!pageindex || !Array.isArray((pageindex as any).roots)) return c.json({ error: "No pageindex for artifact" }, 404);
+
+  const matches = searchPageIndex(pageindex.roots || [], q, { limit });
+
+  return c.json({
+    ok: true,
+    artifact_id: String((artifact as any).id),
+    project_id: String((artifact as any).project_id),
+    query: q,
+    matches,
   });
 });

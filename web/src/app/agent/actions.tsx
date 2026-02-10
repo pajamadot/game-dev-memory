@@ -23,12 +23,28 @@ type AgentAssetSummary = {
   created_at: string;
 };
 
+type AgentDocumentEvidence = {
+  kind: "pageindex";
+  artifact_id: string;
+  project_id: string;
+  node_id: string;
+  title: string;
+  path: string[];
+  excerpt: string;
+  score: number;
+};
+
 type AskAgentOk = {
   ok: true;
   query: string;
   project_id: string | null;
   provider: { kind: "none" | "anthropic"; model?: string };
-  retrieved: { memories: AgentMemorySummary[]; assets_index: Record<string, AgentAssetSummary[]> };
+  retrieval_plan?: { mode: "manual" | "heuristic" | "llm"; strategies: string[]; reason: string };
+  retrieved: {
+    memories: AgentMemorySummary[];
+    assets_index: Record<string, AgentAssetSummary[]>;
+    documents: AgentDocumentEvidence[];
+  };
   answer: string | null;
   notes?: string[];
 };
@@ -42,6 +58,7 @@ export async function askProjectMemoryAgent(_prev: AskAgentState | null, formDat
   const project_id_raw = String(formData.get("project_id") || "").trim();
   const project_id = project_id_raw ? project_id_raw : null;
   const include_assets = Boolean(formData.get("include_assets"));
+  const include_documents = Boolean(formData.get("include_documents"));
   const dry_run = Boolean(formData.get("dry_run"));
 
   if (!query) return { ok: false, error: "query is required" };
@@ -54,6 +71,7 @@ export async function askProjectMemoryAgent(_prev: AskAgentState | null, formDat
         query,
         project_id,
         include_assets,
+        include_documents,
         dry_run,
         limit: 12,
       }),
@@ -100,6 +118,7 @@ export async function saveAgentAnswerAsMemory(_prev: SaveAgentState | null, form
   const answer = String(formData.get("answer") || "").trim();
   const retrieved_memories_json = String(formData.get("retrieved_memories_json") || "").trim();
   const retrieved_assets_json = String(formData.get("retrieved_assets_json") || "").trim();
+  const retrieved_docs_json = String(formData.get("retrieved_docs_json") || "").trim();
 
   if (!project_id) return { ok: false, error: "project_id is required to save a memory" };
   if (!title) return { ok: false, error: "title is required" };
@@ -108,11 +127,21 @@ export async function saveAgentAnswerAsMemory(_prev: SaveAgentState | null, form
 
   let retrieved_memory_ids: string[] = [];
   let retrieved_asset_ids: string[] = [];
+  let retrieved_doc_refs: string[] = [];
 
   try {
     if (retrieved_memories_json) {
       const parsed = JSON.parse(retrieved_memories_json);
       if (Array.isArray(parsed)) retrieved_memory_ids = parsed.filter((x) => typeof x === "string").slice(0, 200);
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    if (retrieved_docs_json) {
+      const parsed = JSON.parse(retrieved_docs_json);
+      if (Array.isArray(parsed)) retrieved_doc_refs = parsed.filter((x) => typeof x === "string").slice(0, 200);
     }
   } catch {
     // ignore
@@ -136,6 +165,7 @@ export async function saveAgentAnswerAsMemory(_prev: SaveAgentState | null, form
     "",
     retrieved_memory_ids.length ? `Evidence memories: ${retrieved_memory_ids.map((id) => `[mem:${id}]`).join(" ")}` : "",
     retrieved_asset_ids.length ? `Evidence assets: ${retrieved_asset_ids.map((id) => `[asset:${id}]`).join(" ")}` : "",
+    retrieved_doc_refs.length ? `Evidence docs: ${retrieved_doc_refs.map((ref) => `[doc:${ref}]`).join(" ")}` : "",
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -158,6 +188,7 @@ export async function saveAgentAnswerAsMemory(_prev: SaveAgentState | null, form
             query,
             retrieved_memory_ids,
             retrieved_asset_ids,
+            retrieved_doc_refs,
           },
         },
         confidence: 0.7,

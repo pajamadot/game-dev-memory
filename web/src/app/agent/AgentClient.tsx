@@ -56,6 +56,21 @@ export function AgentClient(props: { projects: ProjectRow[] }) {
     }
     return out;
   })();
+  const retrievedDocRefs: string[] = (() => {
+    if (!ok) return [];
+    const docs = ((state as any).retrieved.documents || []) as any[];
+    const out: string[] = [];
+    for (const d of docs) {
+      const aid = String((d as any).artifact_id || "");
+      const nid = String((d as any).node_id || "");
+      if (!aid || !nid) continue;
+      const ref = `${aid}#${nid}`;
+      if (out.includes(ref)) continue;
+      out.push(ref);
+      if (out.length >= 200) return out;
+    }
+    return out;
+  })();
 
   const saveOk = saveState && (saveState as any).ok === true;
   const saveErr = saveState && (saveState as any).ok === false ? (saveState as any).error : null;
@@ -96,6 +111,10 @@ export function AgentClient(props: { projects: ProjectRow[] }) {
                 <label className="inline-flex items-center gap-2">
                   <input type="checkbox" name="include_assets" defaultChecked className="h-4 w-4 rounded border-zinc-300" />
                   Include assets
+                </label>
+                <label className="inline-flex items-center gap-2">
+                  <input type="checkbox" name="include_documents" defaultChecked className="h-4 w-4 rounded border-zinc-300" />
+                  Include documents
                 </label>
                 <label className="inline-flex items-center gap-2">
                   <input type="checkbox" name="dry_run" className="h-4 w-4 rounded border-zinc-300" />
@@ -244,6 +263,7 @@ export function AgentClient(props: { projects: ProjectRow[] }) {
                 <input type="hidden" name="answer" value={String((state as any).answer || "")} />
                 <input type="hidden" name="retrieved_memories_json" value={JSON.stringify(retrievedMemoryIds)} />
                 <input type="hidden" name="retrieved_assets_json" value={JSON.stringify(retrievedAssetIds)} />
+                <input type="hidden" name="retrieved_docs_json" value={JSON.stringify(retrievedDocRefs)} />
 
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <button className="inline-flex h-10 items-center justify-center rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-800">
@@ -331,6 +351,30 @@ export function AgentClient(props: { projects: ProjectRow[] }) {
                 })}
               </ul>
             )}
+
+            {ok && ((state as any).retrieved.documents || []).length ? (
+              <div className="mt-6 rounded-3xl border border-zinc-200 bg-white p-5">
+                <p className="text-sm font-semibold text-zinc-950">Documents</p>
+                <p className="mt-1 text-xs text-zinc-600">PageIndex-based matches from indexed artifacts.</p>
+                <ul className="mt-3 space-y-2">
+                  {((state as any).retrieved.documents || []).slice(0, 12).map((d: any) => (
+                    <li key={`${d.artifact_id}#${d.node_id}`} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                        <p className="text-sm font-semibold text-zinc-950">{String(d.title || "Document section")}</p>
+                        <p className="text-[11px] text-zinc-500">score={Number(d.score || 0).toFixed(0)}</p>
+                      </div>
+                      <p className="mt-2 break-words font-mono text-xs text-zinc-700">
+                        doc={String(d.artifact_id || "")}#{String(d.node_id || "")}
+                      </p>
+                      {d.path && Array.isArray(d.path) && d.path.length ? (
+                        <p className="mt-1 text-xs text-zinc-700">path: {d.path.slice(-5).join(" > ")}</p>
+                      ) : null}
+                      {d.excerpt ? <p className="mt-3 text-xs leading-5 text-zinc-700">{String(d.excerpt).slice(0, 900)}</p> : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
         </>
       ) : null}

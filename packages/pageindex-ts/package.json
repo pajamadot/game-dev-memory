@@ -1,0 +1,9 @@
+{
+  "name": "@pajamadot/pageindex-ts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "PageIndex-TS: minimal TypeScript port inspired by VectifyAI/PageIndex for hierarchical (TOC-like) document indexing."
+}
+

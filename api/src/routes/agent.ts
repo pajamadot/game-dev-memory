@@ -4,6 +4,8 @@ import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
 import { createMemory, listMemories } from "../core/memories";
 import { anthropicMessages } from "../agent/anthropic";
+import { retrievePageIndexEvidence, type PageIndexEvidence } from "../agent/pageindex";
+import { heuristicRetrievalPlan, llmRetrievalPlan, type RetrievalPlan } from "../agent/retrievalPlanner";
 
 function clampInt(v: unknown, fallback: number, min: number, max: number): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v) : NaN;
@@ -56,6 +58,8 @@ type AssetSummary = {
   created_at: string;
 };
 
+type DocumentEvidence = PageIndexEvidence;
+
 function summarizeMemory(m: any): MemorySummary {
   return {
     id: String(m.id),
@@ -98,10 +102,30 @@ agentRouter.post("/ask", async (c) => {
   const projectId = asString(body.project_id || body.projectId).trim() || null;
   const limit = clampInt(body.limit, 12, 1, 50);
   const includeAssets = Boolean(body.include_assets ?? true);
+  const includeDocuments = Boolean(body.include_documents ?? body.include_docs ?? true);
+  const documentLimit = clampInt(body.document_limit, 8, 0, 50);
+  const retrievalMode = asString(body.retrieval_mode || body.retrievalMode || body.mode).trim().toLowerCase() || "auto";
 
   const dryRun = Boolean(body.dry_run ?? false);
 
-  const { memories, assetsByMemoryId } = await withDbClient(c.env, async (db) => {
+  const allowDocuments = Boolean(projectId && includeDocuments && documentLimit > 0);
+
+  let retrieval_plan: RetrievalPlan = heuristicRetrievalPlan(query, { allowDocuments });
+  if (retrievalMode === "memories" || retrievalMode === "memories_only") {
+    retrieval_plan = { mode: "manual", strategies: ["memories_fts"], reason: "Manual override: memories only." };
+  } else if (retrievalMode === "documents" || retrievalMode === "documents_only") {
+    retrieval_plan = allowDocuments
+      ? { mode: "manual", strategies: ["pageindex_artifacts"], reason: "Manual override: documents only." }
+      : heuristicRetrievalPlan(query, { allowDocuments });
+  } else if (retrievalMode === "hybrid") {
+    retrieval_plan = allowDocuments
+      ? { mode: "manual", strategies: ["memories_fts", "pageindex_artifacts"], reason: "Manual override: hybrid retrieval." }
+      : heuristicRetrievalPlan(query, { allowDocuments });
+  } else if (retrievalMode === "llm" && !dryRun && c.env.ANTHROPIC_API_KEY) {
+    retrieval_plan = await llmRetrievalPlan(c.env as any, query, { allowDocuments });
+  }
+
+  const { memories, assetsByMemoryId, documents } = await withDbClient(c.env, async (db) => {
     const rawMemRows = await listMemories(db, tenantType, tenantId, {
       projectId,
       search: query,
@@ -154,7 +178,16 @@ agentRouter.post("/ask", async (c) => {
       }
     }
 
-    return { memories: memRows, assetsByMemoryId };
+    let documents: DocumentEvidence[] = [];
+    if (projectId && includeDocuments && documentLimit > 0 && retrieval_plan.strategies.includes("pageindex_artifacts")) {
+      documents = await retrievePageIndexEvidence(db, tenantType, tenantId, {
+        projectId,
+        query,
+        limit: documentLimit,
+      });
+    }
+
+    return { memories: memRows, assetsByMemoryId, documents };
   });
 
   const retrieved = memories.map(summarizeMemory);
@@ -164,15 +197,18 @@ agentRouter.post("/ask", async (c) => {
     if (assets.length) assets_index[m.id] = assets;
   }
 
+  const retrievedDocs = documents || [];
+
   let answer: string | null = null;
   let provider: { kind: "none" | "anthropic"; model?: string } = { kind: "none" };
 
-  if (!dryRun && c.env.ANTHROPIC_API_KEY && retrieved.length > 0) {
+  if (!dryRun && c.env.ANTHROPIC_API_KEY && (retrieved.length > 0 || retrievedDocs.length > 0)) {
     const system = [
       "You are PajamaDot Project Memory Agent.",
       "Answer the user's question using ONLY the provided project memories and linked assets metadata as evidence.",
       "If the evidence is insufficient, say so and propose exactly what to record/upload next.",
       "Cite memories as [mem:<uuid>] and assets as [asset:<uuid>] when used.",
+      "Cite documents as [doc:<artifact_uuid>#<node_id>] when used.",
       "Keep the answer concise and action-oriented.",
     ].join("\n");
 
@@ -192,6 +228,16 @@ agentRouter.post("/ask", async (c) => {
             `    - [asset:${a.id}] ${a.original_name || "asset"} (${a.content_type}, ${a.byte_size} bytes, status=${a.status})`
           );
         }
+      }
+    }
+
+    if (retrievedDocs.length) {
+      ctxLines.push("");
+      ctxLines.push("DOCUMENT INDEX MATCHES:");
+      for (const d of retrievedDocs.slice(0, 12)) {
+        ctxLines.push(`- [doc:${d.artifact_id}#${d.node_id}] score=${Number(d.score).toFixed(0)} title=${d.title}`);
+        if (d.path && d.path.length) ctxLines.push(`  path: ${d.path.slice(-5).join(" > ")}`);
+        if (d.excerpt) ctxLines.push(`  excerpt: ${excerpt(String(d.excerpt || ""), 900)}`);
       }
     }
 
@@ -216,7 +262,8 @@ agentRouter.post("/ask", async (c) => {
     query,
     project_id: projectId,
     provider,
-    retrieved: { memories: retrieved, assets_index },
+    retrieval_plan,
+    retrieved: { memories: retrieved, assets_index, documents: retrievedDocs },
     answer,
     notes:
       provider.kind === "none"
@@ -408,14 +455,34 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
   if (!message) return c.json({ ok: false, error: "content is required" }, 400);
 
   const includeAssets = truthy(body.include_assets ?? true);
+  const includeDocuments = truthy(body.include_documents ?? body.include_docs ?? true);
   const dryRun = truthy(body.dry_run ?? false);
   const historyLimit = clampInt(body.history_limit, 20, 0, 200);
   const evidenceLimit = clampInt(body.evidence_limit ?? body.limit, 12, 1, 50);
+  const documentLimit = clampInt(body.document_limit, 8, 0, 50);
+  const retrievalMode = asString(body.retrieval_mode || body.retrievalMode || body.mode).trim().toLowerCase() || "auto";
 
   const now = new Date().toISOString();
   const userMessageId = crypto.randomUUID();
 
-  const { projectId, history, retrieved, assets_index } = await withDbClient(c.env, async (db) => {
+  const allowDocuments = Boolean(includeDocuments && documentLimit > 0);
+
+  let retrieval_plan: RetrievalPlan = heuristicRetrievalPlan(message, { allowDocuments });
+  if (retrievalMode === "memories" || retrievalMode === "memories_only") {
+    retrieval_plan = { mode: "manual", strategies: ["memories_fts"], reason: "Manual override: memories only." };
+  } else if (retrievalMode === "documents" || retrievalMode === "documents_only") {
+    retrieval_plan = allowDocuments
+      ? { mode: "manual", strategies: ["pageindex_artifacts"], reason: "Manual override: documents only." }
+      : heuristicRetrievalPlan(message, { allowDocuments });
+  } else if (retrievalMode === "hybrid") {
+    retrieval_plan = allowDocuments
+      ? { mode: "manual", strategies: ["memories_fts", "pageindex_artifacts"], reason: "Manual override: hybrid retrieval." }
+      : heuristicRetrievalPlan(message, { allowDocuments });
+  } else if (retrievalMode === "llm" && !dryRun && c.env.ANTHROPIC_API_KEY) {
+    retrieval_plan = await llmRetrievalPlan(c.env as any, message, { allowDocuments });
+  }
+
+  const { projectId, history, retrieved, assets_index, documents } = await withDbClient(c.env, async (db) => {
     const sRes = await db.query(
       "SELECT id, project_id FROM sessions WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3 AND kind = 'agent'",
       [sessionId, tenantType, tenantId]
@@ -529,7 +596,16 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
       if (assets.length) assets_index[m.id] = assets;
     }
 
-    return { projectId, history, retrieved: evidenceSummaries, assets_index };
+    let documents: DocumentEvidence[] = [];
+    if (includeDocuments && documentLimit > 0 && retrieval_plan.strategies.includes("pageindex_artifacts")) {
+      documents = await retrievePageIndexEvidence(db, tenantType, tenantId, {
+        projectId,
+        query: message,
+        limit: documentLimit,
+      });
+    }
+
+    return { projectId, history, retrieved: evidenceSummaries, assets_index, documents };
   });
 
   let answer: string | null = null;
@@ -542,6 +618,7 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
       "Use ONLY the provided project memories and linked assets metadata as evidence.",
       "If the evidence is insufficient, say so and propose exactly what to record/upload next.",
       "Cite memories as [mem:<uuid>] and assets as [asset:<uuid>] when used.",
+      "Cite documents as [doc:<artifact_uuid>#<node_id>] when used.",
       "Keep the answer concise and action-oriented.",
     ].join("\n");
 
@@ -565,6 +642,16 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     }
     if (retrieved.length === 0) {
       ctxLines.push("- (none matched)");
+    }
+
+    if (documents && documents.length) {
+      ctxLines.push("");
+      ctxLines.push("DOCUMENT INDEX MATCHES:");
+      for (const d of documents.slice(0, 12)) {
+        ctxLines.push(`- [doc:${d.artifact_id}#${d.node_id}] score=${Number(d.score).toFixed(0)} title=${d.title}`);
+        if (d.path && d.path.length) ctxLines.push(`  path: ${d.path.slice(-5).join(" > ")}`);
+        if (d.excerpt) ctxLines.push(`  excerpt: ${excerpt(String(d.excerpt || ""), 900)}`);
+      }
     }
 
     const ctx = ctxLines.join("\n");
@@ -601,6 +688,8 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
       if (evidence_asset_ids.length >= 200) break;
     }
 
+    const evidence_documents = (documents || []).slice(0, 100).map((d) => ({ artifact_id: d.artifact_id, node_id: d.node_id }));
+
     assistantMessageId = crypto.randomUUID();
     await withDbClient(c.env, async (db) => {
       await createMemory(db, {
@@ -619,7 +708,7 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
           role: "assistant",
           provider,
           session_id: sessionId,
-          evidence: { memory_ids: evidence_memory_ids, asset_ids: evidence_asset_ids },
+          evidence: { memory_ids: evidence_memory_ids, asset_ids: evidence_asset_ids, documents: evidence_documents },
         },
         confidence: 0.6,
         nowIso: new Date().toISOString(),
@@ -632,9 +721,10 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     session_id: sessionId,
     project_id: projectId,
     provider,
+    retrieval_plan,
     user_message_id: userMessageId,
     assistant_message_id: assistantMessageId,
-    retrieved: { memories: retrieved, assets_index },
+    retrieved: { memories: retrieved, assets_index, documents: documents || [] },
     answer,
     notes:
       provider.kind === "none"

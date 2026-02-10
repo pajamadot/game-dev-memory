@@ -29,7 +29,7 @@ export async function anthropicMessages(env: Env, opts: {
   system: string;
   messages: AnthropicMessage[];
   maxTokens: number;
-}): Promise<{ text: string; model: string }> {
+}): Promise<{ text: string; model: string; stopReason: string | null }> {
   const apiKey = requiredString(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
   const model = resolveAnthropicModel(env);
   const version = resolveAnthropicVersion(env);
@@ -62,5 +62,5 @@ export async function anthropicMessages(env: Env, opts: {
     .join("")
     .trim();
 
-  return { text: out, model: data.model || model };
+  return { text: out, model: data.model || model, stopReason: data.stop_reason || null };
 }
