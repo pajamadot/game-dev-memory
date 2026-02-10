@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { askProjectMemoryAgent, type AskAgentState } from "./actions";
 
@@ -153,7 +154,12 @@ export function AgentClient(props: { projects: ProjectRow[] }) {
                     <li key={m.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                          <p className="text-sm font-semibold text-zinc-950">{m.title}</p>
+                          <Link
+                            href={`/memories/${m.id}`}
+                            className="text-sm font-semibold text-zinc-950 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
+                          >
+                            {m.title}
+                          </Link>
                           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500">
                             <span className="font-mono">{m.id}</span>
                             <span>{m.category}</span>
@@ -179,7 +185,13 @@ export function AgentClient(props: { projects: ProjectRow[] }) {
                           <ul className="mt-2 space-y-1 text-[11px] text-zinc-700">
                             {assets.slice(0, 8).map((a: any) => (
                               <li key={a.id} className="font-mono">
-                                {a.original_name || "asset"} ({a.content_type}, {bytes(a.byte_size)}) [{a.status}] id={a.id}
+                                <Link
+                                  href={`/assets/${a.id}`}
+                                  className="underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
+                                >
+                                  {a.original_name || "asset"}
+                                </Link>{" "}
+                                ({a.content_type}, {bytes(a.byte_size)}) [{a.status}] id={a.id}
                               </li>
                             ))}
                           </ul>
