@@ -48,5 +48,22 @@ async function handlePajamaDownload(c: any) {
 export const downloadsRouter = new Hono<AppEnv>();
 
 // Public binary distribution for the `pajama` CLI (used by the npm installer).
+downloadsRouter.get("/pajama", (c) => {
+  return c.json({
+    ok: true,
+    name: "pajama",
+    description: "Prebuilt `pajama` CLI binaries (download prefix).",
+    pattern: "/downloads/pajama/v{version}/{file}",
+    examples: [
+      "/downloads/pajama/v0.1.1/pajama-win32-x64.exe",
+      "/downloads/pajama/v0.1.1/pajama-win32-x64.exe.sha256",
+    ],
+    notes: [
+      "This endpoint is a prefix; download URLs include a version and filename.",
+      "Recommended install: `npm i -g @pajamadot/pajama` (downloads the binary automatically).",
+    ],
+  });
+});
+downloadsRouter.on("HEAD", "/pajama", (c) => new Response(null, { status: 200 }));
 downloadsRouter.get("/pajama/:version/:file", handlePajamaDownload);
 downloadsRouter.on("HEAD", "/pajama/:version/:file", handlePajamaDownload);
