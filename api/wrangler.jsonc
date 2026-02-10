@@ -49,7 +49,10 @@
   "routes": [
     // Keep these two production domains.
     { "pattern": "api-game-dev-memory.pajamadot.com", "custom_domain": true },
-    { "pattern": "mcp-game-dev-memory.pajamadot.com", "custom_domain": true }
+    { "pattern": "mcp-game-dev-memory.pajamadot.com", "custom_domain": true },
+
+    // Dedicated hostname for the agent runtime (same worker; different entrypoint for clients).
+    { "pattern": "game-dev-agent.pajamadot.com", "custom_domain": true }
   ],
 
   "vars": {
