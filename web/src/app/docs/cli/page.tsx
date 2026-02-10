@@ -4,12 +4,82 @@ import path from "node:path";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { auth } from "@clerk/nextjs/server";
+import { CopyLlmSnippetButton } from "../_components/CopyLlmSnippetButton";
 
 export const dynamic = "force-dynamic";
 
 async function loadMarkdown(): Promise<string> {
   const mdPath = path.join(process.cwd(), "src", "content", "docs", "cli.md");
   return await readFile(mdPath, "utf8");
+}
+
+function llmBootstrapSnippet(): string {
+  return [
+    "# Game Dev Memory: CLI + Skills (LLM Bootstrap)",
+    "",
+    "Use this snippet to teach an agent how to install the `pajama` CLI, authenticate, and install the public skills shipped in this repo.",
+    "",
+    "## Install CLI",
+    "```powershell",
+    "npm i -g @pajamadot/pajama",
+    "```",
+    "",
+    "## Login (interactive OAuth)",
+    "```powershell",
+    "pajama login",
+    "# or if browser auto-open is blocked:",
+    "pajama login --no-open",
+    "```",
+    "",
+    "## API Key (non-interactive agents)",
+    "- Create an API key in the web UI: `Settings -> API Keys` (org scope = shared, personal scope = private).",
+    "- Use it via env var or per-command flag.",
+    "",
+    "```powershell",
+    "$env:PAJAMA_API_URL = \"https://api-game-dev-memory.pajamadot.com\"",
+    "$env:PAJAMA_TOKEN = \"gdm_...\"",
+    "pajama projects list",
+    "```",
+    "",
+    "## Common Operations",
+    "```powershell",
+    "pajama projects list",
+    "pajama memories list --project-id <project-uuid> --limit 50",
+    "pajama memories create --project-id <project-uuid> --category note --title \"...\" --content \"...\" --tags \"tag1,tag2\"",
+    "",
+    "# Evidence files (R2 assets): upload + link to memory",
+    "pajama assets upload --project-id <project-uuid> --path \"C:\\\\tmp\\\\build.zip\"",
+    "pajama assets upload --project-id <project-uuid> --memory-id <memory-uuid> --path \"C:\\\\tmp\\\\Saved\\\\Logs\\\\MyProject.log\"",
+    "```",
+    "",
+    "## Install Agent Skill: pajama-cli (Codex / Claude Code)",
+    "Skill directory defaults:",
+    "- Windows: `%USERPROFILE%\\\\.codex\\\\skills`",
+    "- macOS/Linux: `~/.codex/skills`",
+    "",
+    "### PowerShell (Windows)",
+    "```powershell",
+    "$CODEX = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME \".codex\" }",
+    "$tmp = Join-Path $env:TEMP \"gdm-skill\"",
+    "if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }",
+    "git clone --depth 1 https://github.com/pajamadot/game-dev-memory.git $tmp",
+    "New-Item -ItemType Directory -Force (Join-Path $CODEX \"skills\\\\pajama-cli\") | Out-Null",
+    "Copy-Item -Recurse -Force (Join-Path $tmp \"skills\\\\pajama-cli\\\\*\") (Join-Path $CODEX \"skills\\\\pajama-cli\")",
+    "```",
+    "",
+    "### Bash (macOS/Linux)",
+    "```bash",
+    "CODEX_HOME=\"${CODEX_HOME:-$HOME/.codex}\"",
+    "tmp=\"$(mktemp -d)\"",
+    "git clone --depth 1 https://github.com/pajamadot/game-dev-memory.git \"$tmp/gdm\"",
+    "mkdir -p \"$CODEX_HOME/skills/pajama-cli\"",
+    "cp -R \"$tmp/gdm/skills/pajama-cli/\"* \"$CODEX_HOME/skills/pajama-cli/\"",
+    "```",
+    "",
+    "Docs:",
+    "- https://game-dev-memory.pajamadot.com/docs/cli",
+    "- https://game-dev-memory.pajamadot.com/docs/skills",
+  ].join("\n");
 }
 
 function scopeLabel(orgId: string | null): { label: string; hint: string } {
@@ -40,6 +110,7 @@ export default async function CliDocsPage() {
             <p className="mt-1 text-sm text-zinc-600">Install once. Auto sync your memory everywhere.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <CopyLlmSnippetButton text={llmBootstrapSnippet()} />
             <Link
               href="/"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"

@@ -51,7 +51,7 @@ cp -R "$tmp/gdm/skills/pajama-cli/"* "$CODEX_HOME/skills/pajama-cli/"
 
 ## Bundled Skills
 
-| Skill | What it’s for |
+| Skill | What it's for |
 | --- | --- |
 | `pajama-cli` | Use `pajama` to record memories and attach evidence assets (logs/zips/traces). |
 | `memory-evolver` | Self-evolution loop that reads `/api/evolve/signals` and writes evolution events and seed knowledge. |
@@ -64,4 +64,3 @@ cp -R "$tmp/gdm/skills/pajama-cli/"* "$CODEX_HOME/skills/pajama-cli/"
 1. Create a memory for what happened and why.
 2. Upload evidence files as assets and link them to the memory.
 3. Run evolver cycles (optional) when sessions close or when the system is stable.
-
