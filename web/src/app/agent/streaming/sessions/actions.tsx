@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { apiJson } from "@/lib/memory-api";
 
-export async function createProAgentSession(formData: FormData): Promise<void> {
+export async function createStreamingAgentSession(formData: FormData): Promise<void> {
   const project_id = String(formData.get("project_id") || "").trim();
   const title = String(formData.get("title") || "").trim();
 
@@ -21,6 +21,5 @@ export async function createProAgentSession(formData: FormData): Promise<void> {
     throw new Error((res as any).error || "Failed to create session");
   }
 
-  redirect(`/agent/pro/sessions/${(res as any).id}`);
+  redirect(`/agent/streaming/sessions/${(res as any).id}`);
 }
-

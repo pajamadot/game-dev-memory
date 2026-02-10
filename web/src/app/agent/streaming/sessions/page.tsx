@@ -2,7 +2,7 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { SignInButton } from "@clerk/nextjs";
 import { apiJson } from "@/lib/memory-api";
-import { createAgentSession } from "./actions";
+import { createStreamingAgentSession } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +29,7 @@ function fmt(ts: string | null | undefined): string {
   }
 }
 
-export default async function AgentSessionsPage() {
+export default async function StreamingAgentSessionsPage() {
   const { userId } = await auth();
 
   if (!userId) {
@@ -39,7 +39,7 @@ export default async function AgentSessionsPage() {
           <div className="rounded-3xl border border-zinc-200/70 bg-white/70 p-10 shadow-sm backdrop-blur">
             <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">AGENT</p>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950">Sign in required</h1>
-            <p className="mt-2 text-sm leading-6 text-zinc-600">Sign in to create and continue agent sessions.</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">Sign in to create and continue streaming sessions.</p>
             <div className="mt-6 flex items-center gap-3">
               <SignInButton mode="modal">
                 <button className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-800">
@@ -63,7 +63,7 @@ export default async function AgentSessionsPage() {
   const projects = projRes.projects || [];
   const projectById = new Map(projects.map((p) => [p.id, p]));
 
-  const sessRes = await apiJson<{ sessions: AgentSessionRow[] }>("/api/agent/sessions?limit=100");
+  const sessRes = await apiJson<{ sessions: AgentSessionRow[] }>("/api/agent-pro/sessions?limit=100");
   const sessions = sessRes.sessions || [];
 
   return (
@@ -74,7 +74,7 @@ export default async function AgentSessionsPage() {
             <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">AGENT</p>
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">Agent Sessions</h1>
             <p className="mt-1 text-sm text-zinc-600">
-              Persistent chat threads (moltworker/story-agent style) backed by sessions + memories.
+              Container-backed, streaming sessions (Cloudflare Sandbox). Evidence is stored as normal project memory.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -85,16 +85,10 @@ export default async function AgentSessionsPage() {
               Ask
             </Link>
             <Link
-              href="/agent/streaming/sessions"
+              href="/agent/streaming"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
-              Streaming sessions
-            </Link>
-            <Link
-              href="/assets"
-              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
-            >
-              Files
+              About
             </Link>
             <Link
               href="/"
@@ -113,13 +107,13 @@ export default async function AgentSessionsPage() {
                 Sessions are project-scoped. Use org scope for shared sessions; personal scope stays private.
               </p>
 
-              <form action={createAgentSession} className="mt-4 space-y-3">
+              <form action={createStreamingAgentSession} className="mt-4 space-y-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-zinc-700" htmlFor="agent-session-project">
+                  <label className="text-xs font-medium text-zinc-700" htmlFor="streaming-agent-session-project">
                     Project
                   </label>
                   <select
-                    id="agent-session-project"
+                    id="streaming-agent-session-project"
                     name="project_id"
                     required
                     className="mt-1 h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none ring-zinc-900/10 focus:ring-4"
@@ -137,13 +131,13 @@ export default async function AgentSessionsPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-zinc-700" htmlFor="agent-session-title">
+                  <label className="text-xs font-medium text-zinc-700" htmlFor="streaming-agent-session-title">
                     Title (optional)
                   </label>
                   <input
-                    id="agent-session-title"
+                    id="streaming-agent-session-title"
                     name="title"
-                    placeholder="Shader compile stalls investigation"
+                    placeholder="UE5 build time regression deep dive"
                     className="mt-1 h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none ring-zinc-900/10 focus:ring-4"
                   />
                 </div>
@@ -161,7 +155,7 @@ export default async function AgentSessionsPage() {
               <p className="mt-1 text-xs text-zinc-600">{sessions.length} loaded</p>
 
               {sessions.length === 0 ? (
-                <p className="mt-4 text-sm text-zinc-600">No agent sessions yet.</p>
+                <p className="mt-4 text-sm text-zinc-600">No sessions yet.</p>
               ) : (
                 <ul className="mt-4 space-y-3">
                   {sessions.slice(0, 50).map((s) => {
@@ -171,7 +165,7 @@ export default async function AgentSessionsPage() {
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0">
                             <Link
-                              href={`/agent/sessions/${s.id}`}
+                              href={`/agent/streaming/sessions/${s.id}`}
                               className="text-sm font-semibold text-zinc-950 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
                             >
                               {s.title || "Agent Session"}

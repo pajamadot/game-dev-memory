@@ -52,16 +52,16 @@ app.get("/", (c) => {
   if (host === "game-dev-agent.pajamadot.com") {
     // Professional UX for the agent hostname: browsers should land on the UI,
     // while non-browser clients get structured endpoint metadata.
-    if (wantsHtml) return c.redirect(`${c.env.WEBSITE_URL}/agent/pro`, 302);
+    if (wantsHtml) return c.redirect(`${c.env.WEBSITE_URL}/agent/streaming`, 302);
 
     return c.json({
       name: "game-dev-agent",
       status: "ok",
-      ui: `${c.env.WEBSITE_URL}/agent/pro`,
+      ui: `${c.env.WEBSITE_URL}/agent/streaming`,
       endpoints: {
-        pro_sessions: `${origin}/api/agent-pro/sessions`,
-        pro_session_messages: `${origin}/api/agent-pro/sessions/:id/messages`,
-        pro_continue: `${origin}/api/agent-pro/sessions/:id/continue`,
+        streaming_sessions: `${origin}/api/agent-pro/sessions`,
+        streaming_session_messages: `${origin}/api/agent-pro/sessions/:id/messages`,
+        streaming_continue: `${origin}/api/agent-pro/sessions/:id/continue`,
         standard_agent_ask: `${origin}/api/agent/ask`,
         memories: `${origin}/api/memories`,
         assets: `${origin}/api/assets`,

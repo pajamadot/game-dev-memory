@@ -41,12 +41,12 @@ test.describe("Public UX smoke", () => {
     await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
   });
 
-  test("agent pro pages (logged out) render", async ({ page }) => {
-    await page.goto("/agent/pro");
+  test("agent streaming pages (logged out) render", async ({ page }) => {
+    await page.goto("/agent/streaming");
     await expect(page.getByRole("heading", { name: /Game Dev Agent/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
 
-    await page.goto("/agent/pro/sessions");
+    await page.goto("/agent/streaming/sessions");
     await expect(page.getByRole("heading", { name: /Sign in required/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
   });

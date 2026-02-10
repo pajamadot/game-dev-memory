@@ -84,7 +84,7 @@ async function readSseStream(res: Response, onEvent: (ev: any) => void) {
   }
 }
 
-export function ProAgentChatClient(props: {
+export function StreamingAgentChatClient(props: {
   sessionId: string;
   title: string;
   project: ProjectInfo | null;
@@ -183,13 +183,13 @@ export function ProAgentChatClient(props: {
                 <span className="text-zinc-500">({props.project.engine})</span>
               </>
             ) : (
-              "Project-scoped pro agent chat with streaming progress."
+              "Project-scoped agent chat with streaming progress."
             )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            href="/agent/pro/sessions"
+            href="/agent/streaming/sessions"
             className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
           >
             Back to sessions
@@ -269,11 +269,11 @@ export function ProAgentChatClient(props: {
             </div>
 
             <div className="mt-6 rounded-3xl border border-zinc-200 bg-white p-4">
-              <label className="text-xs font-medium text-zinc-700" htmlFor="pro-agent-draft">
+              <label className="text-xs font-medium text-zinc-700" htmlFor="streaming-agent-draft">
                 Message
               </label>
               <textarea
-                id="pro-agent-draft"
+                id="streaming-agent-draft"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 rows={4}
