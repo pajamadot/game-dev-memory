@@ -22,7 +22,7 @@ npm publish --access public --otp <6-digit>
 - Provider: GitHub Actions
 - GitHub owner: `pajamadot`
 - GitHub repo: `game-dev-memory`
-- Workflow file path: `.github/workflows/publish-pajama.yml`
+- Workflow filename: `publish-pajama.yml`
 
 After this, the workflow can publish without OTP or npm tokens.
 
@@ -51,4 +51,3 @@ The GitHub Action will:
 - Verify tag matches `packages/pajama/package.json` version
 - Verify the R2 download exists for the matching version
 - Publish to npm using GitHub OIDC (Trusted Publishing)
-
