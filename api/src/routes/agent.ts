@@ -102,11 +102,14 @@ agentRouter.post("/ask", async (c) => {
   const dryRun = Boolean(body.dry_run ?? false);
 
   const { memories, assetsByMemoryId } = await withDbClient(c.env, async (db) => {
-    const memRows = await listMemories(db, tenantType, tenantId, {
+    const rawMemRows = await listMemories(db, tenantType, tenantId, {
       projectId,
       search: query,
       limit,
     });
+
+    // Avoid feeding agent chat back into retrieval evidence.
+    const memRows = rawMemRows.filter((m: any) => !String(m?.category || "").startsWith("agent_"));
 
     const memIds = memRows.map((m: any) => String(m.id));
     const assetsByMemoryId = new Map<string, AssetSummary[]>();

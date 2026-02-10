@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
+// Default to a non-standard port to avoid accidentally reusing an unrelated dev server
+// that might already be running on :3000.
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3040";
 const isLocal =
   baseURL.includes("localhost") ||
   baseURL.includes("127.0.0.1") ||
@@ -24,9 +26,9 @@ export default defineConfig({
   },
   webServer: startServer
     ? {
-        command: "npm --prefix web run dev",
+        command: "npm --prefix web run dev -- --port 3040",
         url: baseURL,
-        reuseExistingServer: true,
+        reuseExistingServer: false,
         timeout: 120_000,
       }
     : undefined,
@@ -37,4 +39,3 @@ export default defineConfig({
     },
   ],
 });
-

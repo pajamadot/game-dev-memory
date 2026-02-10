@@ -7,6 +7,33 @@
   "compatibility_date": "2026-02-08",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Pro agent runtime (Cloudflare Sandbox Containers + DO gateway).
+  "containers": [
+    {
+      "name": "game-dev-memory-agent-sandbox",
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 10
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "Sandbox",
+        "class_name": "Sandbox"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox"]
+    }
+  ],
+
   // Daily research cron (runs scheduled() handler).
   // Default: 09:00 UTC (adjust as needed).
   "triggers": {
@@ -20,13 +47,7 @@
   // Custom domains for production.
   // These must exist in the Cloudflare zone and be enabled for Workers.
   "routes": [
-    { "pattern": "api.game-dev-memory.pajamadot.com", "custom_domain": true },
-    { "pattern": "mcp.game-dev-memory.pajamadot.com", "custom_domain": true },
-
-    // NOTE: Cloudflare Universal SSL does not cover multi-level subdomains like
-    // `api.game-dev-memory.pajamadot.com` unless you provision additional certs
-    // (e.g. `*.game-dev-memory.pajamadot.com`). These single-level fallbacks
-    // are covered by `*.pajamadot.com` and typically enable HTTPS immediately.
+    // Keep these two production domains.
     { "pattern": "api-game-dev-memory.pajamadot.com", "custom_domain": true },
     { "pattern": "mcp-game-dev-memory.pajamadot.com", "custom_domain": true }
   ],

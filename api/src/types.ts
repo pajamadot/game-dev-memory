@@ -1,6 +1,8 @@
 export interface Env {
   HYPERDRIVE?: Hyperdrive;
   MEMORY_BUCKET?: R2Bucket;
+  // Cloudflare Sandbox DO binding (for pro agent runtime).
+  Sandbox?: DurableObjectNamespace;
   ENVIRONMENT: string;
   // Fallback for local execution/testing without a Hyperdrive binding.
   DATABASE_URL?: string;

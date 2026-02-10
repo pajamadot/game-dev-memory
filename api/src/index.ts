@@ -1,3 +1,6 @@
+import { proxyToSandbox } from "@cloudflare/sandbox";
+export { Sandbox } from "@cloudflare/sandbox";
+
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./types";
@@ -14,6 +17,7 @@ import { downloadsRouter } from "./routes/downloads";
 import { researchRouter } from "./routes/research";
 import { tokensRouter } from "./routes/tokens";
 import { agentRouter } from "./routes/agent";
+import { agentProRouter } from "./routes/agentPro";
 import { oauthRouter } from "./routes/oauth";
 import { TenantError } from "./tenant";
 import { runUnrealAgentsDailyDigestForAllTenants } from "./research/unrealAgents";
@@ -111,11 +115,16 @@ app.route("/api/assets", assetsRouter);
 app.route("/api/research", researchRouter);
 app.route("/api/tokens", tokensRouter);
 app.route("/api/agent", agentRouter);
+app.route("/api/agent-pro", agentProRouter);
 app.route("/api/oauth", oauthRouter);
 app.route("/downloads", downloadsRouter);
 
 export default {
-  fetch: app.fetch,
+  fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
+    const proxyResponse = await proxyToSandbox(request, env as any);
+    if (proxyResponse) return proxyResponse;
+    return app.fetch(request, env as any, ctx);
+  },
   scheduled: async (event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
     // Keep cron work bounded and deterministic: one daily digest sweep.
     //

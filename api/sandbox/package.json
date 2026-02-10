@@ -1,0 +1,13 @@
+{
+  "name": "game-dev-memory-agent-sandbox",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Project Memory Pro Agent runner for Cloudflare Sandbox",
+  "dependencies": {
+    "tsx": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}
+
