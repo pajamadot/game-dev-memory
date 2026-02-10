@@ -159,6 +159,15 @@ export default async function Home() {
                   <p className="mt-1 text-xs leading-5 text-zinc-600">Neon Postgres via Hyperdrive + R2 chunking.</p>
                 </div>
               </div>
+
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                <p className="text-xs font-semibold text-zinc-900">CLI</p>
+                <p className="mt-1 text-xs leading-5 text-zinc-600">Install the CLI and sync memory everywhere.</p>
+                <pre className="mt-3 overflow-auto rounded-xl bg-zinc-950 px-4 py-3 font-mono text-[12px] leading-5 text-zinc-50">
+npm i -g @pajamadot/pajama
+pajama login
+                </pre>
+              </div>
             </div>
           </div>
           <p className="mt-8 text-center text-xs text-zinc-500">Sign in and use the org switcher to choose shared vs private scope.</p>

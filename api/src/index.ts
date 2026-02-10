@@ -10,6 +10,7 @@ import { evolveRouter } from "./routes/evolve";
 import { sessionsRouter } from "./routes/sessions";
 import { artifactsRouter } from "./routes/artifacts";
 import { assetsRouter } from "./routes/assets";
+import { downloadsRouter } from "./routes/downloads";
 import { researchRouter } from "./routes/research";
 import { tokensRouter } from "./routes/tokens";
 import { oauthRouter } from "./routes/oauth";
@@ -108,6 +109,7 @@ app.route("/api/assets", assetsRouter);
 app.route("/api/research", researchRouter);
 app.route("/api/tokens", tokensRouter);
 app.route("/api/oauth", oauthRouter);
+app.route("/downloads", downloadsRouter);
 
 export default {
   fetch: app.fetch,

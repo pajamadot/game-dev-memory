@@ -26,6 +26,12 @@ Optional install:
 cargo install --path . --force
 ```
 
+Install via npm (prebuilt binary):
+
+```powershell
+npm i -g @pajamadot/pajama
+```
+
 ## Auth
 
 Interactive login (opens browser, loopback redirect):
@@ -39,6 +45,10 @@ If the environment can't open a browser:
 ```powershell
 pajama login --no-open
 ```
+
+If you need more time to approve in the browser:
+
+- Set `PAJAMA_OAUTH_CALLBACK_TIMEOUT_SECS=900` (default) or higher
 
 Non-interactive (CI-like) auth for local agent sessions:
 
@@ -73,4 +83,3 @@ pajama assets list --project-id <project-uuid>
 - You changed auth/OAuth and need to validate the full browser login loop.
 - You changed Memory API endpoints and want a stable, repeatable way to exercise them.
 - You are building ingestion tooling (UE logs, traces) and want to upload/link large artifacts quickly.
-

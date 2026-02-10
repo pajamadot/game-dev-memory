@@ -29,6 +29,23 @@ export function TokensClient(props: { scopeLabel: string; scopeHint: string; tok
   return (
     <div className="space-y-6">
       <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+        <h2 className="text-sm font-semibold tracking-wide text-zinc-900">CLI Quickstart</h2>
+        <p className="mt-1 text-xs leading-5 text-zinc-600">
+          Install once, then login via the browser (OAuth PKCE) or set <span className="font-mono">PAJAMA_TOKEN</span> to use an API
+          key from this page.
+        </p>
+        <pre className="mt-3 overflow-auto rounded-2xl border border-zinc-200 bg-zinc-950 px-4 py-3 font-mono text-[12px] leading-5 text-zinc-50">
+npm i -g @pajamadot/pajama
+pajama login
+pajama projects list
+        </pre>
+        <p className="mt-3 text-xs text-zinc-600">
+          Default API base: <span className="font-mono">https://api-game-dev-memory.pajamadot.com</span> (override with{" "}
+          <span className="font-mono">PAJAMA_API_URL</span>).
+        </p>
+      </section>
+
+      <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-semibold tracking-wide text-zinc-900">API Keys</h2>
@@ -114,7 +131,7 @@ export function TokensClient(props: { scopeLabel: string; scopeHint: string; tok
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <p className="text-sm font-semibold text-zinc-950">{t.name || "API Token"}</p>
-                      <p className="mt-1 font-mono text-xs text-zinc-600">{t.token_prefix}…</p>
+                      <p className="mt-1 font-mono text-xs text-zinc-600">{t.token_prefix}...</p>
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500">
                         <span>Created {fmt(t.created_at)}</span>
                         {t.last_used_at ? <span>Last used {fmt(t.last_used_at)}</span> : <span>Never used</span>}
@@ -141,4 +158,3 @@ export function TokensClient(props: { scopeLabel: string; scopeHint: string; tok
     </div>
   );
 }
-

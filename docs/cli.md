@@ -23,6 +23,14 @@ Optional install to your Cargo bin dir:
 cargo install --path . --force
 ```
 
+## Install via npm (Recommended)
+
+If you just want the CLI without Rust toolchains, install the prebuilt binary via npm:
+
+```powershell
+npm i -g @pajamadot/pajama
+```
+
 ## Login (OAuth PKCE)
 
 ```powershell
@@ -62,10 +70,10 @@ You can override config values without re-login:
 
 - `PAJAMA_API_URL` (base API URL)
 - `PAJAMA_TOKEN` (Bearer token; API key)
+- `PAJAMA_OAUTH_CALLBACK_TIMEOUT_SECS` (loopback callback wait; default 900)
 
 Or pass a token explicitly:
 
 ```powershell
 pajama --token gdm_... projects list
 ```
-
