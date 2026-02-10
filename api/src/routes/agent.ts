@@ -37,6 +37,52 @@ function excerpt(s: string, max: number): string {
   return `${t.slice(0, max).trimEnd()}...`;
 }
 
+function fallbackSynthesis(opts: {
+  query: string;
+  projectId: string | null;
+  dryRun: boolean;
+  llmConfigured: boolean;
+  memoryCount: number;
+  docCount: number;
+}): { answer: string; notes: string[] } {
+  const scope = opts.projectId ? `project ${opts.projectId}` : "all projects";
+  const notes: string[] = [];
+
+  if (opts.dryRun) {
+    notes.push("dry_run=true (retrieval only): no LLM synthesis requested.");
+  } else if (!opts.llmConfigured) {
+    notes.push("LLM is not configured on the API. Set ANTHROPIC_API_KEY (and optionally ANTHROPIC_MODEL/ANTHROPIC_VERSION).");
+  } else {
+    notes.push("LLM synthesis was unavailable (or returned empty). Showing a deterministic summary instead.");
+  }
+
+  if (opts.memoryCount === 0 && opts.docCount === 0) {
+    notes.push("No matching memories/documents were retrieved for this query.");
+  }
+
+  const answer = [
+    `I searched ${scope} for: "${opts.query}"`,
+    "",
+    `Retrieved evidence: ${opts.memoryCount} memories, ${opts.docCount} document matches.`,
+    "",
+    opts.memoryCount === 0 && opts.docCount === 0
+      ? [
+          "I don't have enough recorded project memory to answer yet.",
+          "",
+          "Next steps to make this work:",
+          "- Record a memory describing the issue/decision (include reproduction steps, expected vs actual, and outcome).",
+          "- Upload logs/build output/profiling captures as assets and link them to that memory.",
+          "- (Optional) Upload docs (PDF/MD) as artifacts and run indexing so the agent can cite them.",
+        ].join("\n")
+      : [
+          "Use the retrieved evidence below as starting context.",
+          "If you want a synthesized answer, ensure LLM is configured and re-run with dry_run unchecked.",
+        ].join("\n"),
+  ].join("\n");
+
+  return { answer, notes };
+}
+
 type MemorySummary = {
   id: string;
   project_id: string;
@@ -201,8 +247,10 @@ agentRouter.post("/ask", async (c) => {
 
   let answer: string | null = null;
   let provider: { kind: "none" | "anthropic"; model?: string } = { kind: "none" };
+  const notes: string[] = [];
+  const llmConfigured = Boolean(c.env.ANTHROPIC_API_KEY && String(c.env.ANTHROPIC_API_KEY).trim());
 
-  if (!dryRun && c.env.ANTHROPIC_API_KEY && (retrieved.length > 0 || retrievedDocs.length > 0)) {
+  if (!dryRun && llmConfigured) {
     const system = [
       "You are PajamaDot Project Memory Agent.",
       "Answer the user's question using ONLY the provided project memories and linked assets metadata as evidence.",
@@ -214,19 +262,23 @@ agentRouter.post("/ask", async (c) => {
 
     const ctxLines: string[] = [];
     ctxLines.push("MEMORIES:");
-    for (const m of retrieved.slice(0, 12)) {
-      ctxLines.push(`- [mem:${m.id}] category=${m.category} confidence=${m.confidence.toFixed(2)} updated_at=${m.updated_at}`);
-      ctxLines.push(`  title: ${m.title}`);
-      ctxLines.push(`  content: ${m.content_excerpt}`);
-      if (m.tags.length) ctxLines.push(`  tags: ${m.tags.join(", ")}`);
+    if (retrieved.length === 0) {
+      ctxLines.push("- (none)");
+    } else {
+      for (const m of retrieved.slice(0, 12)) {
+        ctxLines.push(`- [mem:${m.id}] category=${m.category} confidence=${m.confidence.toFixed(2)} updated_at=${m.updated_at}`);
+        ctxLines.push(`  title: ${m.title}`);
+        ctxLines.push(`  content: ${m.content_excerpt}`);
+        if (m.tags.length) ctxLines.push(`  tags: ${m.tags.join(", ")}`);
 
-      const assets = assets_index[m.id] || [];
-      if (assets.length) {
-        ctxLines.push(`  assets:`);
-        for (const a of assets.slice(0, 8)) {
-          ctxLines.push(
-            `    - [asset:${a.id}] ${a.original_name || "asset"} (${a.content_type}, ${a.byte_size} bytes, status=${a.status})`
-          );
+        const assets = assets_index[m.id] || [];
+        if (assets.length) {
+          ctxLines.push(`  assets:`);
+          for (const a of assets.slice(0, 8)) {
+            ctxLines.push(
+              `    - [asset:${a.id}] ${a.original_name || "asset"} (${a.content_type}, ${a.byte_size} bytes, status=${a.status})`
+            );
+          }
         }
       }
     }
@@ -242,19 +294,40 @@ agentRouter.post("/ask", async (c) => {
     }
 
     const ctx = ctxLines.join("\n");
-    const res = await anthropicMessages(c.env, {
-      system,
-      maxTokens: clampInt(body.max_tokens, 800, 128, 2048),
-      messages: [
-        {
-          role: "user",
-          content: `Question:\n${query}\n\nContext:\n${ctx}\n`,
-        },
-      ],
-    });
+    try {
+      const res = await anthropicMessages(c.env, {
+        system,
+        maxTokens: clampInt(body.max_tokens, 800, 128, 2048),
+        messages: [
+          {
+            role: "user",
+            content: `Question:\n${query}\n\nContext:\n${ctx}\n`,
+          },
+        ],
+      });
 
-    answer = res.text || null;
-    provider = { kind: "anthropic", model: res.model };
+      answer = res.text || null;
+      provider = { kind: "anthropic", model: res.model };
+      if (!answer) {
+        notes.push(`LLM returned empty response (stop_reason=${res.stopReason ?? "unknown"}).`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      notes.push(`LLM synthesis failed: ${msg}`);
+    }
+  }
+
+  if (!answer) {
+    const fb = fallbackSynthesis({
+      query,
+      projectId,
+      dryRun,
+      llmConfigured,
+      memoryCount: retrieved.length,
+      docCount: retrievedDocs.length,
+    });
+    answer = fb.answer;
+    notes.push(...fb.notes);
   }
 
   return c.json({
@@ -265,10 +338,7 @@ agentRouter.post("/ask", async (c) => {
     retrieval_plan,
     retrieved: { memories: retrieved, assets_index, documents: retrievedDocs },
     answer,
-    notes:
-      provider.kind === "none"
-        ? ["LLM is not configured (or dry_run=true). Returning retrieval results only."]
-        : [],
+    notes,
   });
 });
 
