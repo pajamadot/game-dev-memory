@@ -174,6 +174,13 @@ pajama login
                   >
                     Full CLI docs
                   </Link>
+                  <span className="mx-2 text-zinc-300">·</span>
+                  <Link
+                    href="/docs/skills"
+                    className="text-xs font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
+                  >
+                    Agent skills install
+                  </Link>
                 </div>
               </div>
             </div>
@@ -240,6 +247,12 @@ pajama login
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
               CLI Docs
+            </Link>
+            <Link
+              href="/docs/skills"
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Skills
             </Link>
             <Link
               href="/evolve"

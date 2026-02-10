@@ -157,6 +157,8 @@ To make a skill "public":
 - Keep `skills/<name>/` in a public GitHub repo (and make sure it contains **no secrets**).
 - Document a copy/install command into the agent's skill directory.
 
+Full guide: `/docs/skills`.
+
 Install `pajama-cli` skill (PowerShell):
 
 ```powershell

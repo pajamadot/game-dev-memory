@@ -44,6 +44,10 @@ pajama projects list
           <Link className="font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800" href="/docs/cli">
             Full CLI docs
           </Link>
+          <span className="mx-2 text-zinc-400">·</span>
+          <Link className="font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800" href="/docs/skills">
+            Agent skills install
+          </Link>
         </p>
         <p className="mt-3 text-xs text-zinc-600">
           Default API base: <span className="font-mono">https://api-game-dev-memory.pajamadot.com</span> (override with{" "}

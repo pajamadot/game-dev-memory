@@ -149,6 +149,12 @@ pajama projects list
               <div className="mt-3 flex flex-col gap-2 text-sm">
                 <Link
                   className="text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
+                  href="/docs/skills"
+                >
+                  Agent skills install
+                </Link>
+                <Link
+                  className="text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
                   href="/research/agent-memory"
                 >
                   Agent Memory research
