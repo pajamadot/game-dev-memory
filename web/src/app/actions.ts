@@ -96,3 +96,13 @@ export async function runUnrealAgentsDigest(_formData: FormData) {
 
   revalidatePath("/research/unreal-agents");
 }
+
+export async function runAgentMemoryDigest(_formData: FormData) {
+  await apiJson("/api/research/agent-memory/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+
+  revalidatePath("/research/agent-memory");
+}

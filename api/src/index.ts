@@ -16,6 +16,7 @@ import { tokensRouter } from "./routes/tokens";
 import { oauthRouter } from "./routes/oauth";
 import { TenantError } from "./tenant";
 import { runUnrealAgentsDailyDigestForAllTenants } from "./research/unrealAgents";
+import { runAgentMemoryDailyDigestForAllTenants } from "./research/agentMemory";
 import { getOAuthMetadata, getProtectedResourceMetadata, handleAuthorize, handleRegister, handleToken } from "./oauth/server";
 import { handleMcpJsonRpc, MCP_ERROR_CODES, type McpRequest, type McpResponse } from "./mcp/server";
 
@@ -122,9 +123,24 @@ export default {
     ctx.waitUntil(
       (async () => {
         try {
-          await runUnrealAgentsDailyDigestForAllTenants(env, when);
+          await Promise.all([
+            (async () => {
+              try {
+                await runUnrealAgentsDailyDigestForAllTenants(env, when);
+              } catch (err) {
+                console.error("[cron] unreal-agents digest failed:", err);
+              }
+            })(),
+            (async () => {
+              try {
+                await runAgentMemoryDailyDigestForAllTenants(env, when);
+              } catch (err) {
+                console.error("[cron] agent-memory digest failed:", err);
+              }
+            })(),
+          ]);
         } catch (err) {
-          console.error("[cron] unreal-agents digest failed:", err);
+          console.error("[cron] digest sweep failed:", err);
         }
       })()
     );
