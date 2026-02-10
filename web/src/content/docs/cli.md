@@ -148,3 +148,34 @@ $env:PAJAMA_DOWNLOAD_BASE_URL = "https://api-game-dev-memory.pajamadot.com/downl
 npm i -g @pajamadot/pajama
 ```
 
+## Agent Skills (Codex / Claude Code)
+
+This repo ships public agent skills in `skills/` (for example: `skills/pajama-cli`). A skill is just a folder with a `SKILL.md` (and optional scripts/references).
+
+To make a skill "public":
+
+- Keep `skills/<name>/` in a public GitHub repo (and make sure it contains **no secrets**).
+- Document a copy/install command into the agent's skill directory.
+
+Install `pajama-cli` skill (PowerShell):
+
+```powershell
+$CODEX = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
+$tmp = Join-Path $env:TEMP "gdm-skill"
+if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+git clone --depth 1 https://github.com/pajamadot/game-dev-memory.git $tmp
+New-Item -ItemType Directory -Force (Join-Path $CODEX "skills\\pajama-cli") | Out-Null
+Copy-Item -Recurse -Force (Join-Path $tmp "skills\\pajama-cli\\*") (Join-Path $CODEX "skills\\pajama-cli")
+```
+
+Install `pajama-cli` skill (macOS/Linux):
+
+```bash
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+tmp="$(mktemp -d)"
+git clone --depth 1 https://github.com/pajamadot/game-dev-memory.git "$tmp/gdm"
+mkdir -p "$CODEX_HOME/skills/pajama-cli"
+cp -R "$tmp/gdm/skills/pajama-cli/"* "$CODEX_HOME/skills/pajama-cli/"
+```
+
+After install, you can tell your agent to use the `pajama-cli` skill to record memories and attach evidence files (assets) during sessions.
