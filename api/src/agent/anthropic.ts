@@ -21,7 +21,8 @@ function resolveAnthropicVersion(env: Env): string {
 
 function resolveAnthropicModel(env: Env): string {
   // Keep a reasonable default, but allow override in env.
-  return (env.ANTHROPIC_MODEL && env.ANTHROPIC_MODEL.trim()) || "claude-3-5-sonnet-20241022";
+  // Opus 4.5 model id per Anthropic announcement.
+  return (env.ANTHROPIC_MODEL && env.ANTHROPIC_MODEL.trim()) || "claude-opus-4-5-20251101";
 }
 
 export async function anthropicMessages(env: Env, opts: {
@@ -63,4 +64,3 @@ export async function anthropicMessages(env: Env, opts: {
 
   return { text: out, model: data.model || model };
 }
-

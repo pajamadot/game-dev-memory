@@ -188,7 +188,8 @@ async function anthropicRequest(opts: {
   version?: string;
 }): Promise<{ blocks: AnthropicContentBlock[]; model: string }> {
   const apiKey = required("ANTHROPIC_API_KEY", opts.apiKey);
-  const model = (opts.model && opts.model.trim()) || "claude-3-5-sonnet-20241022";
+  // Opus 4.5 model id per Anthropic announcement.
+  const model = (opts.model && opts.model.trim()) || "claude-opus-4-5-20251101";
   const version = (opts.version && opts.version.trim()) || "2023-06-01";
 
   const tools = Array.isArray(opts.tools) ? opts.tools : undefined;
