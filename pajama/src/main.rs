@@ -269,7 +269,8 @@ struct AssetRow {
     status: String,
     r2_key: String,
     content_type: String,
-    byte_size: i64,
+    #[serde(deserialize_with = "de_u64_from_str_or_int")]
+    byte_size: u64,
     original_name: Option<String>,
     created_at: Option<String>,
 }
@@ -759,4 +760,46 @@ fn choose_part_size(file_size: u64, part_size_mb: Option<u32>) -> u64 {
     }
 
     clamp_part_size(part)
+}
+
+fn de_u64_from_str_or_int<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct V;
+
+    impl<'de> serde::de::Visitor<'de> for V {
+        type Value = u64;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(f, "a non-negative integer or a string containing one")
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<u64, E> {
+            Ok(v)
+        }
+
+        fn visit_i64<E>(self, v: i64) -> Result<u64, E>
+        where
+            E: serde::de::Error,
+        {
+            u64::try_from(v).map_err(E::custom)
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<u64, E>
+        where
+            E: serde::de::Error,
+        {
+            v.parse::<u64>().map_err(E::custom)
+        }
+
+        fn visit_string<E>(self, v: String) -> Result<u64, E>
+        where
+            E: serde::de::Error,
+        {
+            v.parse::<u64>().map_err(E::custom)
+        }
+    }
+
+    deserializer.deserialize_any(V)
 }
