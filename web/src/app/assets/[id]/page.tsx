@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { SignInButton } from "@clerk/nextjs";
-import { apiJson } from "@/lib/memory-api";
+import { apiJson, clerkTenantHeaders } from "@/lib/memory-api";
+import { CopyTextButton } from "@/app/_components/CopyTextButton";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,14 @@ type AssetRow = {
   linked_memories?: LinkedMemorySummary[];
 };
 
+function apiBaseUrl(): string {
+  return (
+    process.env.MEMORY_API_URL ||
+    process.env.NEXT_PUBLIC_MEMORY_API_URL ||
+    "https://api-game-dev-memory.pajamadot.com"
+  );
+}
+
 function fmt(ts: string | null | undefined): string {
   if (!ts) return "";
   try {
@@ -50,6 +59,20 @@ function bytes(n: number): string {
   }
   const p = i === 0 ? 0 : v >= 100 ? 0 : v >= 10 ? 1 : 2;
   return `${v.toFixed(p)} ${units[i]}`;
+}
+
+function isTextLikeContentType(contentType: string | null | undefined): boolean {
+  if (!contentType) return false;
+  const ct = contentType.toLowerCase();
+  if (ct.startsWith("text/")) return true;
+  if (ct.includes("json")) return true;
+  if (ct.includes("xml")) return true;
+  if (ct.includes("yaml") || ct.includes("yml")) return true;
+  if (ct.includes("toml")) return true;
+  if (ct.includes("javascript")) return true;
+  if (ct.includes("typescript")) return true;
+  if (ct.includes("csv")) return true;
+  return false;
 }
 
 export default async function AssetPage(props: { params: Promise<{ id: string }> | { id: string } }) {
@@ -124,6 +147,31 @@ export default async function AssetPage(props: { params: Promise<{ id: string }>
   const name = asset.original_name || "asset";
   const linked = Array.isArray(asset.linked_memories) ? asset.linked_memories : [];
   const linkedCount = Number.isFinite(asset.linked_memory_count as any) ? Number(asset.linked_memory_count) : linked.length;
+
+  const previewEligible = asset.status === "ready" && isTextLikeContentType(asset.content_type) && Number(asset.byte_size || 0) > 0;
+  const previewMaxBytes = 64 * 1024;
+
+  let previewText: string | null = null;
+  let previewTruncated = false;
+  let previewError: string | null = null;
+
+  if (previewEligible) {
+    try {
+      const headers = await clerkTenantHeaders();
+      const byteSize = Math.max(0, Math.trunc(Number(asset.byte_size || 0)));
+      const end = Math.max(0, Math.min(byteSize, previewMaxBytes) - 1);
+      const url = `${apiBaseUrl()}/api/assets/${encodeURIComponent(id)}/object?byte_start=0&byte_end=${end}`;
+      const res = await fetch(url, { cache: "no-store", headers });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Preview fetch failed (${res.status}): ${text || res.statusText}`);
+      }
+      previewText = await res.text();
+      previewTruncated = byteSize > previewMaxBytes;
+    } catch (e) {
+      previewError = e instanceof Error ? e.message : String(e);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[radial-gradient(900px_circle_at_10%_-20%,#bfdbfe_0%,transparent_55%),radial-gradient(900px_circle_at_90%_0%,#fde68a_0%,transparent_55%),linear-gradient(180deg,#fafafa_0%,#ffffff_60%,#fafafa_100%)]">
@@ -213,6 +261,35 @@ export default async function AssetPage(props: { params: Promise<{ id: string }>
               <p className="mt-3 text-xs text-zinc-500">Showing {linked.length} of {linkedCount} linked memories.</p>
             ) : null}
           </section>
+
+          {previewEligible ? (
+            <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Preview</h2>
+                  <p className="mt-1 text-xs leading-5 text-zinc-600">
+                    First {bytes(previewMaxBytes)} (text-like assets only). {previewTruncated ? "Truncated." : ""}
+                  </p>
+                </div>
+                {previewText ? <CopyTextButton text={previewText} label="Copy preview" /> : null}
+              </div>
+
+              {previewError ? (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+                  <p className="font-semibold">Preview failed</p>
+                  <p className="mt-1 break-words font-mono">{previewError}</p>
+                </div>
+              ) : null}
+
+              {previewText ? (
+                <pre className="mt-4 max-h-[520px] overflow-auto rounded-2xl border border-zinc-200 bg-zinc-950 p-4 text-xs leading-5 text-zinc-100">
+                  {previewText}
+                </pre>
+              ) : previewError ? null : (
+                <p className="mt-4 text-sm text-zinc-600">No preview available.</p>
+              )}
+            </section>
+          ) : null}
 
           <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
             <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Download</h2>

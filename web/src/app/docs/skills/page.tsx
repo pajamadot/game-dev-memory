@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CopyLlmSnippetButton } from "../_components/CopyLlmSnippetButton";
+import { CopyTextButton } from "@/app/_components/CopyTextButton";
 
 export const dynamic = "force-static";
 
@@ -78,7 +78,7 @@ export default async function SkillsDocsPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <CopyLlmSnippetButton text={llmBootstrapSnippet()} />
+            <CopyTextButton text={llmBootstrapSnippet()} label="Copy for LLM" />
             <Link
               href="/docs/cli"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"

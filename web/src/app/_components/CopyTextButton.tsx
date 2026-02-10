@@ -22,10 +22,10 @@ async function copyText(text: string): Promise<void> {
   document.body.removeChild(ta);
 }
 
-export function CopyLlmSnippetButton(props: { text: string; label?: string }) {
+export function CopyTextButton(props: { text: string; label?: string }) {
   const [state, setState] = useState<"idle" | "copied" | "error">("idle");
 
-  const label = props.label || "Copy for LLM";
+  const label = props.label || "Copy";
 
   const buttonText = useMemo(() => {
     if (state === "copied") return "Copied";

@@ -131,20 +131,67 @@ async function memoryApiJson(
   return fetchJson(url, { ...init, headers, timeoutMs: init.timeoutMs });
 }
 
-type AnthropicMessage = { role: "user" | "assistant"; content: string };
-type AnthropicResponse = { content?: { type?: string; text?: string }[]; model?: string };
+async function fetchBytes(
+  url: string,
+  init: RequestInit & { timeoutMs?: number } = {}
+): Promise<{ bytes: Uint8Array; contentType: string | null }> {
+  const timeoutMs = typeof init.timeoutMs === "number" ? init.timeoutMs : 30_000;
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const buf = await res.arrayBuffer().catch(() => new ArrayBuffer(0));
+    if (!res.ok) {
+      const text = buf.byteLength ? new TextDecoder().decode(new Uint8Array(buf)).slice(0, 2000) : "";
+      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+    }
+    const ct = res.headers.get("content-type");
+    return { bytes: new Uint8Array(buf), contentType: ct };
+  } finally {
+    clearTimeout(t);
+  }
+}
 
-async function anthropicMessages(opts: {
+async function memoryApiBytes(
+  baseUrl: string,
+  authorization: string,
+  path: string,
+  init: RequestInit & { timeoutMs?: number } = {}
+): Promise<{ bytes: Uint8Array; contentType: string | null }> {
+  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  const headers = new Headers(init.headers || {});
+  if (authorization) headers.set("Authorization", authorization);
+  return fetchBytes(url, { ...init, headers, timeoutMs: init.timeoutMs });
+}
+
+type AnthropicContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+
+type AnthropicMessage = { role: "user" | "assistant"; content: string | AnthropicContentBlock[] };
+type AnthropicResponse = { content?: AnthropicContentBlock[]; model?: string };
+
+type AnthropicTool = {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+};
+
+async function anthropicRequest(opts: {
   apiKey: string;
   system: string;
   messages: AnthropicMessage[];
+  tools?: AnthropicTool[];
   maxTokens: number;
   model?: string;
   version?: string;
-}): Promise<{ text: string; model: string }> {
+}): Promise<{ blocks: AnthropicContentBlock[]; model: string }> {
   const apiKey = required("ANTHROPIC_API_KEY", opts.apiKey);
   const model = (opts.model && opts.model.trim()) || "claude-3-5-sonnet-20241022";
   const version = (opts.version && opts.version.trim()) || "2023-06-01";
+
+  const tools = Array.isArray(opts.tools) ? opts.tools : undefined;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -158,6 +205,7 @@ async function anthropicMessages(opts: {
       max_tokens: Math.max(64, Math.min(4096, Math.trunc(opts.maxTokens))),
       system: opts.system,
       messages: opts.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...(tools ? { tools } : {}),
     }),
   });
 
@@ -167,14 +215,8 @@ async function anthropicMessages(opts: {
   }
 
   const data = (await res.json()) as AnthropicResponse;
-  const parts = Array.isArray(data.content) ? data.content : [];
-  const out = parts
-    .filter((p) => p && (p.type === "text" || p.type === undefined) && typeof p.text === "string")
-    .map((p) => p.text)
-    .join("")
-    .trim();
-
-  return { text: out, model: data.model || model };
+  const blocks = Array.isArray(data.content) ? data.content : [];
+  return { blocks, model: data.model || model };
 }
 
 function buildEvidenceContext(retrieved: AskResponse["retrieved"]): string {
@@ -198,6 +240,58 @@ function buildEvidenceContext(retrieved: AskResponse["retrieved"]): string {
     ctxLines.push("- (none matched)");
   }
   return ctxLines.join("\n");
+}
+
+function isTextLikeContentType(contentType: string | null | undefined): boolean {
+  if (!contentType) return false;
+  const ct = contentType.toLowerCase();
+  if (ct.startsWith("text/")) return true;
+  if (ct.includes("json")) return true;
+  if (ct.includes("xml")) return true;
+  if (ct.includes("yaml") || ct.includes("yml")) return true;
+  if (ct.includes("toml")) return true;
+  if (ct.includes("javascript")) return true;
+  if (ct.includes("typescript")) return true;
+  if (ct.includes("csv")) return true;
+  return false;
+}
+
+function mergeRetrieved(
+  into: AskResponse["retrieved"],
+  next: AskResponse["retrieved"]
+): AskResponse["retrieved"] {
+  const byId = new Map(into.memories.map((m) => [m.id, m]));
+  for (const m of next.memories || []) {
+    if (!m || !m.id) continue;
+    if (byId.has(m.id)) continue;
+    into.memories.push(m);
+    byId.set(m.id, m);
+  }
+
+  const idx = into.assets_index || (into.assets_index = {});
+  const nextIdx = next.assets_index || {};
+  for (const [k, assets] of Object.entries(nextIdx)) {
+    if (!Array.isArray(assets) || assets.length === 0) continue;
+    const existing = idx[k] || [];
+    const seen = new Set(existing.map((a) => a.id));
+    for (const a of assets) {
+      if (!a || !a.id) continue;
+      if (seen.has(a.id)) continue;
+      existing.push(a);
+      seen.add(a.id);
+    }
+    idx[k] = existing;
+  }
+
+  return into;
+}
+
+function blocksToText(blocks: AnthropicContentBlock[]): string {
+  const out: string[] = [];
+  for (const b of blocks || []) {
+    if (b && b.type === "text" && typeof (b as any).text === "string") out.push((b as any).text);
+  }
+  return out.join("").trim();
 }
 
 async function main(): Promise<void> {
@@ -248,35 +342,239 @@ async function main(): Promise<void> {
   } else if (!anthropicKey) {
     notes.push("ANTHROPIC_API_KEY not configured for sandbox run (no synthesis).");
   } else {
-    trace({ type: "status", sessionId, message: "synthesizing answer (anthropic)" });
+    trace({ type: "status", sessionId, message: "running agent loop (anthropic tools)" });
+
+    const tools: AnthropicTool[] = [
+      {
+        name: "search_evidence",
+        description:
+          "Search project memory for relevant evidence (and linked asset metadata). Use this when the initial evidence is insufficient or you need a narrower query.",
+        input_schema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Search query to run against project memories." },
+            project_id: { type: "string", description: "Optional project id override (defaults to the current session project)." },
+            limit: { type: "integer", minimum: 1, maximum: 50 },
+            include_assets: { type: "boolean", description: "Whether to include linked asset metadata in results." },
+          },
+          required: ["query"],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "read_asset_text",
+        description:
+          "Read a text chunk from an asset (logs, JSON, YAML, config). Use small ranges. If the file is large, read a small chunk first and then read further ranges as needed.",
+        input_schema: {
+          type: "object",
+          properties: {
+            asset_id: { type: "string" },
+            byte_start: { type: "integer", minimum: 0 },
+            max_bytes: { type: "integer", minimum: 256, maximum: 120000 },
+          },
+          required: ["asset_id"],
+          additionalProperties: false,
+        },
+      },
+    ];
+
     const system = [
-      "You are PajamaDot Project Memory Pro Agent.",
+      "You are PajamaDot Game Dev Agent (Claude Code-like tool agent) running in a sandbox.",
       "You are chatting with a user about a game-dev project.",
-      "Use ONLY the provided project memories and linked assets metadata as evidence.",
-      "If the evidence is insufficient, say so and propose exactly what to record/upload next.",
+      "You have access to tools to search project memories and to read chunks of text assets (logs/config).",
+      "Use ONLY project memories and asset contents/metadata as evidence.",
+      "If evidence is insufficient, say so and propose exactly what to record/upload next.",
       "Cite memories as [mem:<uuid>] and assets as [asset:<uuid>] when used.",
       "Keep the answer concise and action-oriented.",
     ].join("\n");
 
-    const evidenceCtx = buildEvidenceContext(retrieved);
+    const mergedRetrieved: AskResponse["retrieved"] = {
+      memories: [...(retrieved.memories || [])],
+      assets_index: { ...(retrieved.assets_index || {}) },
+    };
+    const extraAssets: RetrievedAsset[] = [];
 
     const older = history.length > 0 ? history.slice(0, Math.max(0, history.length - 1)) : [];
-    const messages: AnthropicMessage[] = [
-      ...older.map((m) => ({ role: m.role, content: m.content })),
-      { role: "user", content: `Question:\n${query}\n\nEvidence:\n${evidenceCtx}\n` },
-    ];
-
-    const res = await anthropicMessages({
-      apiKey: anthropicKey,
-      system,
-      messages,
-      maxTokens,
-      model: anthropicModel || undefined,
-      version: anthropicVersion || undefined,
+    const messages: AnthropicMessage[] = [...older.map((m) => ({ role: m.role, content: m.content }))];
+    messages.push({
+      role: "user",
+      content: `Question:\n${query}\n\nInitial evidence (from memory search):\n${buildEvidenceContext(mergedRetrieved)}\n\nIf you need more evidence, use the tools.`,
     });
 
-    provider = { kind: "anthropic", model: res.model };
-    answer = res.text || null;
+    const MAX_TURNS = 8;
+    let modelUsed = anthropicModel || undefined;
+
+    for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+      const res = await anthropicRequest({
+        apiKey: anthropicKey,
+        system,
+        messages,
+        tools,
+        maxTokens,
+        model: modelUsed,
+        version: anthropicVersion || undefined,
+      });
+
+      modelUsed = res.model || modelUsed;
+      const blocks = Array.isArray(res.blocks) ? res.blocks : [];
+      messages.push({ role: "assistant", content: blocks });
+
+      const toolUses = blocks.filter((b) => b && b.type === "tool_use") as Array<
+        Extract<AnthropicContentBlock, { type: "tool_use" }>
+      >;
+
+      if (toolUses.length === 0) {
+        provider = { kind: "anthropic", model: res.model };
+        answer = blocksToText(blocks) || null;
+        break;
+      }
+
+      const toolResults: AnthropicContentBlock[] = [];
+
+      for (const tu of toolUses.slice(0, 6)) {
+        const name = String(tu.name || "").trim();
+        const input = tu.input;
+
+        trace({ type: "tool_call", sessionId, name, input: typeof input === "object" ? input : String(input) });
+
+        try {
+          if (name === "search_evidence") {
+            const anyInput = (input && typeof input === "object" ? (input as any) : {}) as any;
+            const q = typeof anyInput.query === "string" ? anyInput.query.trim() : "";
+            if (!q) throw new Error("query is required");
+            const pid = typeof anyInput.project_id === "string" && anyInput.project_id.trim() ? anyInput.project_id.trim() : projectId;
+            const lim = clampInt(String(anyInput.limit ?? ""), evidenceLimit, 1, 50);
+            const inc = typeof anyInput.include_assets === "boolean" ? anyInput.include_assets : includeAssets;
+
+            const more: AskResponse = (await memoryApiJson(apiBaseUrl, authorization, "/api/agent/ask", {
+              method: "POST",
+              body: JSON.stringify({
+                query: q,
+                project_id: pid,
+                include_assets: inc,
+                dry_run: true,
+                limit: lim,
+              }),
+            })) as AskResponse;
+
+            if (more && more.retrieved) {
+              mergeRetrieved(mergedRetrieved, more.retrieved);
+            }
+
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({
+                ok: true,
+                query: q,
+                memory_count: (more?.retrieved?.memories || []).length,
+                memories: (more?.retrieved?.memories || []).slice(0, 12).map((m) => ({
+                  id: m.id,
+                  category: m.category,
+                  title: m.title,
+                  updated_at: m.updated_at,
+                  excerpt: m.content_excerpt,
+                })),
+              }),
+            });
+
+            trace({ type: "tool_result", sessionId, name, ok: true, memories: (more?.retrieved?.memories || []).length });
+            continue;
+          }
+
+          if (name === "read_asset_text") {
+            const anyInput = (input && typeof input === "object" ? (input as any) : {}) as any;
+            const assetId = typeof anyInput.asset_id === "string" ? anyInput.asset_id.trim() : "";
+            if (!assetId) throw new Error("asset_id is required");
+            const byteStart = typeof anyInput.byte_start === "number" && Number.isFinite(anyInput.byte_start) ? Math.trunc(anyInput.byte_start) : 0;
+            const maxBytes = clampInt(String(anyInput.max_bytes ?? ""), 40_000, 256, 120_000);
+            if (byteStart < 0) throw new Error("byte_start must be >= 0");
+
+            const meta = await memoryApiJson(apiBaseUrl, authorization, `/api/assets/${encodeURIComponent(assetId)}`);
+            const status = meta?.status ? String(meta.status) : "";
+            const contentType = meta?.content_type ? String(meta.content_type) : null;
+            const byteSize = meta?.byte_size ? Number(meta.byte_size) : null;
+            const originalName = meta?.original_name ? String(meta.original_name) : null;
+
+            if (status && status !== "ready") {
+              throw new Error(`Asset is not ready (status=${status})`);
+            }
+            if (!isTextLikeContentType(contentType)) {
+              throw new Error(`Asset content_type is not text-like (${contentType || "unknown"})`);
+            }
+
+            const byteEnd = byteStart + maxBytes - 1;
+            const { bytes } = await memoryApiBytes(
+              apiBaseUrl,
+              authorization,
+              `/api/assets/${encodeURIComponent(assetId)}/object?byte_start=${byteStart}&byte_end=${byteEnd}`,
+              { timeoutMs: 45_000 }
+            );
+
+            const text = new TextDecoder().decode(bytes);
+            const preview = excerpt(text, 12_000);
+
+            const assetSummary: RetrievedAsset = {
+              id: assetId,
+              project_id: meta?.project_id ? String(meta.project_id) : projectId,
+              status: status || "ready",
+              content_type: contentType || "text/plain",
+              byte_size: typeof byteSize === "number" && Number.isFinite(byteSize) ? Math.trunc(byteSize) : bytes.length,
+              original_name: originalName,
+              created_at: meta?.created_at ? String(meta.created_at) : "",
+            };
+            if (!extraAssets.find((a) => a.id === assetId)) extraAssets.push(assetSummary);
+
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({
+                ok: true,
+                asset_id: assetId,
+                original_name: originalName,
+                content_type: contentType,
+                byte_size: byteSize,
+                byte_start: byteStart,
+                byte_end: byteStart + bytes.length - 1,
+                text: preview,
+                truncated: preview.length < text.length,
+              }),
+            });
+
+            trace({ type: "tool_result", sessionId, name, ok: true, bytes: bytes.length });
+            continue;
+          }
+
+          throw new Error(`Unknown tool: ${name}`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: JSON.stringify({ ok: false, error: msg }),
+            is_error: true,
+          });
+          trace({ type: "tool_result", sessionId, name, ok: false, error: msg });
+        }
+      }
+
+      // Provide tool results to the model as a user message.
+      messages.push({ role: "user", content: toolResults });
+    }
+
+    if (!answer) {
+      notes.push("Agent loop ended without a final text answer; returning best-effort fallback.");
+    }
+
+    // Persist extra assets into the evidence index so the gateway can include them in the assistant message evidence list.
+    if (extraAssets.length) {
+      (mergedRetrieved.assets_index as any)["__direct_assets__"] = extraAssets;
+    }
+
+    provider = provider.kind === "anthropic" ? provider : { kind: "anthropic", model: modelUsed };
+    // Replace retrieval output with the merged evidence we actually used.
+    (retrieved as any).memories = mergedRetrieved.memories;
+    (retrieved as any).assets_index = mergedRetrieved.assets_index;
   }
 
   if (!answer) {
@@ -329,4 +627,3 @@ main().catch((err) => {
   // Always emit a final JSON line so the gateway can persist a failure deterministically.
   console.log(JSON.stringify(out));
 });
-

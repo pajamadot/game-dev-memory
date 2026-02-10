@@ -4,7 +4,7 @@ import path from "node:path";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { auth } from "@clerk/nextjs/server";
-import { CopyLlmSnippetButton } from "../_components/CopyLlmSnippetButton";
+import { CopyTextButton } from "@/app/_components/CopyTextButton";
 
 export const dynamic = "force-dynamic";
 
@@ -110,7 +110,7 @@ export default async function CliDocsPage() {
             <p className="mt-1 text-sm text-zinc-600">Install once. Auto sync your memory everywhere.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <CopyLlmSnippetButton text={llmBootstrapSnippet()} />
+            <CopyTextButton text={llmBootstrapSnippet()} label="Copy for LLM" />
             <Link
               href="/"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
