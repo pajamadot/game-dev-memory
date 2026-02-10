@@ -13,11 +13,22 @@
     "crons": ["0 9 * * *"]
   },
 
+  // Keep the workers.dev domain available (useful for debugging),
+  // while also binding custom domains via routes below.
+  "workers_dev": true,
+
+  // Custom domains for production.
+  // These must exist in the Cloudflare zone and be enabled for Workers.
+  "routes": [
+    { "pattern": "api.game-dev-memory.pajamadot.com", "custom_domain": true },
+    { "pattern": "mcp.game-dev-memory.pajamadot.com", "custom_domain": true }
+  ],
+
   "vars": {
     "ENVIRONMENT": "development",
     // Deployed web app (OAuth consent UI).
     // For local development, override via `wrangler dev --var WEBSITE_URL=http://localhost:3000`.
-    "WEBSITE_URL": "https://game-dev-memory.vercel.app",
+    "WEBSITE_URL": "https://game-dev-memory.pajamadot.com",
     "CLERK_JWKS_URL": "https://clerk.pajamadot.com/.well-known/jwks.json",
     "ALLOW_INSECURE_TENANT_HEADERS": "false"
   },
