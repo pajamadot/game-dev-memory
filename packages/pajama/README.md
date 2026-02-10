@@ -39,10 +39,13 @@ Installer-only:
 
 This package downloads a platform-specific prebuilt binary at install time.
 
-If your platform is not supported yet, install from source:
+Current prebuilt support (initial release):
+
+- Windows x64 (`win32/x64`)
+
+If you are on macOS or Linux, install from source for now:
 
 ```bash
 cd pajama
 cargo install --path . --force
 ```
-

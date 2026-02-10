@@ -15,6 +15,12 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.js"
   },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "files": [
     "bin",
     "scripts",
