@@ -4,6 +4,39 @@ import type { TenantType } from "../tenant";
 export type MemoryState = "active" | "superseded" | "quarantined";
 export type MemoryQuality = "unknown" | "good" | "bad";
 
+async function recordMemoryEvent(
+  db: Client,
+  input: {
+    tenantType: TenantType;
+    tenantId: string;
+    actorId: string | null;
+    projectId: string | null;
+    memoryId: string;
+    eventType: string;
+    eventData: Record<string, unknown>;
+    nowIso: string;
+  }
+) {
+  await db.query(
+    `INSERT INTO memory_events (
+       id, tenant_type, tenant_id, project_id, memory_id,
+       event_type, event_data, created_at, created_by
+     )
+     VALUES ($1, $2, $3, $4::uuid, $5::uuid, $6, $7::jsonb, $8, $9)`,
+    [
+      crypto.randomUUID(),
+      input.tenantType,
+      input.tenantId,
+      input.projectId,
+      input.memoryId,
+      input.eventType,
+      JSON.stringify(input.eventData || {}),
+      input.nowIso,
+      input.actorId,
+    ]
+  );
+}
+
 export interface ListMemoriesQuery {
   projectId?: string | null;
   category?: string | null;
@@ -175,6 +208,25 @@ export async function createMemory(
       input.actorId,
     ]
   );
+
+  await recordMemoryEvent(db, {
+    tenantType: input.tenantType,
+    tenantId: input.tenantId,
+    actorId: input.actorId,
+    projectId: input.projectId,
+    memoryId: input.id,
+    eventType: "create",
+    eventData: {
+      category: input.category,
+      source_type: input.sourceType,
+      title: input.title,
+      tags: input.tags || [],
+      confidence: input.confidence,
+      session_id: input.sessionId,
+      content_len: input.content ? input.content.length : 0,
+    },
+    nowIso: input.nowIso,
+  });
 }
 
 export async function updateMemory(
@@ -194,6 +246,12 @@ export async function updateMemory(
     nowIso: string;
   }
 ) {
+  const beforeRes = await db.query(
+    "SELECT project_id, title, category, source_type, confidence, state, quality FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3",
+    [input.id, input.tenantType, input.tenantId]
+  );
+  const before = beforeRes.rows[0] ?? null;
+
   await db.query(
     `UPDATE memories
      SET title = $1, content = $2, tags = $3::jsonb, context = $4::jsonb, confidence = $5, category = $6, source_type = $7, updated_at = $8, updated_by = $9
@@ -213,10 +271,72 @@ export async function updateMemory(
       input.tenantId,
     ]
   );
+
+  if (before) {
+    await recordMemoryEvent(db, {
+      tenantType: input.tenantType,
+      tenantId: input.tenantId,
+      actorId: input.actorId,
+      projectId: before.project_id ? String(before.project_id) : null,
+      memoryId: input.id,
+      eventType: "update",
+      eventData: {
+        from: {
+          title: before.title,
+          category: before.category,
+          source_type: before.source_type,
+          confidence: before.confidence,
+          state: before.state,
+          quality: before.quality,
+        },
+        to: {
+          title: input.title,
+          category: input.category,
+          source_type: input.sourceType,
+          confidence: input.confidence ?? 0.5,
+        },
+        content_len: input.content ? input.content.length : 0,
+      },
+      nowIso: input.nowIso,
+    });
+  }
 }
 
-export async function deleteMemory(db: Client, tenantType: TenantType, tenantId: string, id: string) {
-  await db.query("DELETE FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [id, tenantType, tenantId]);
+export async function deleteMemory(
+  db: Client,
+  input: { tenantType: TenantType; tenantId: string; actorId: string | null; id: string; nowIso: string }
+) {
+  const beforeRes = await db.query(
+    "SELECT project_id, title, category, source_type, confidence, state, quality FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3",
+    [input.id, input.tenantType, input.tenantId]
+  );
+  const before = beforeRes.rows[0] ?? null;
+
+  if (before) {
+    await recordMemoryEvent(db, {
+      tenantType: input.tenantType,
+      tenantId: input.tenantId,
+      actorId: input.actorId,
+      projectId: before.project_id ? String(before.project_id) : null,
+      memoryId: input.id,
+      eventType: "delete",
+      eventData: {
+        title: before.title,
+        category: before.category,
+        source_type: before.source_type,
+        confidence: before.confidence,
+        state: before.state,
+        quality: before.quality,
+      },
+      nowIso: input.nowIso,
+    });
+  }
+
+  await db.query("DELETE FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+    input.id,
+    input.tenantType,
+    input.tenantId,
+  ]);
 }
 
 export async function setMemoryLifecycle(
@@ -231,6 +351,13 @@ export async function setMemoryLifecycle(
     nowIso: string;
   }
 ): Promise<{ id: string; state: string; quality: string; updated_at: string } | null> {
+  const beforeRes = await db.query(
+    "SELECT project_id, state, quality FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3",
+    [input.id, input.tenantType, input.tenantId]
+  );
+  const before = beforeRes.rows[0] ?? null;
+  if (!before) return null;
+
   const sets: string[] = [];
   const params: unknown[] = [];
 
@@ -263,5 +390,20 @@ export async function setMemoryLifecycle(
 
   const row = rows[0] as any;
   if (!row) return null;
+
+  await recordMemoryEvent(db, {
+    tenantType: input.tenantType,
+    tenantId: input.tenantId,
+    actorId: input.actorId,
+    projectId: before.project_id ? String(before.project_id) : null,
+    memoryId: input.id,
+    eventType: "lifecycle_set",
+    eventData: {
+      from: { state: String(before.state), quality: String(before.quality) },
+      to: { state: String(row.state), quality: String(row.quality) },
+    },
+    nowIso: input.nowIso,
+  });
+
   return { id: String(row.id), state: String(row.state), quality: String(row.quality), updated_at: String(row.updated_at) };
 }

@@ -48,6 +48,16 @@ type LinkRow = {
 
 type LinksResponse = { inbound: LinkRow[]; outbound: LinkRow[] };
 
+type MemoryEventRow = {
+  id: string;
+  project_id: string | null;
+  memory_id: string;
+  event_type: string;
+  event_data: unknown;
+  created_at: string;
+  created_by: string | null;
+};
+
 function normalizeTags(v: unknown): string[] {
   if (!v) return [];
   if (Array.isArray(v)) return v.filter((t) => typeof t === "string");
@@ -60,6 +70,16 @@ function normalizeTags(v: unknown): string[] {
     }
   }
   return [];
+}
+
+function fmtJson(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
 }
 
 function fmt(ts: string | null | undefined): string {
@@ -106,6 +126,7 @@ export default async function MemoryPage(props: { params: Promise<{ id: string }
   let memory: MemoryRow | null = null;
   let assets: AssetRow[] = [];
   let links: LinksResponse | null = null;
+  let events: MemoryEventRow[] = [];
   let error: string | null = null;
 
   try {
@@ -113,6 +134,8 @@ export default async function MemoryPage(props: { params: Promise<{ id: string }
     const aRes = await apiJson<{ assets: AssetRow[] }>(`/api/assets?memory_id=${encodeURIComponent(id)}&limit=100`);
     assets = aRes.assets || [];
     links = await apiJson<LinksResponse>(`/api/memories/${encodeURIComponent(id)}/links`);
+    const eRes = await apiJson<{ events: MemoryEventRow[] }>(`/api/memories/${encodeURIComponent(id)}/events?limit=100`);
+    events = eRes.events || [];
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
@@ -397,6 +420,35 @@ export default async function MemoryPage(props: { params: Promise<{ id: string }
                   )}
                 </div>
               </div>
+            )}
+          </section>
+
+          <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+            <h2 className="text-sm font-semibold tracking-wide text-zinc-900">History</h2>
+            <p className="mt-1 text-xs text-zinc-600">Audit trail for edits, lifecycle changes, and relationship links.</p>
+            {events.length === 0 ? (
+              <p className="mt-4 text-sm text-zinc-600">No events yet.</p>
+            ) : (
+              <ul className="mt-4 space-y-2">
+                {events.slice(0, 50).map((e) => (
+                  <li key={e.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                      <p className="text-sm font-semibold text-zinc-950">{e.event_type}</p>
+                      <p className="text-[11px] text-zinc-500">{fmt(e.created_at)}</p>
+                    </div>
+                    <p className="mt-2 break-words font-mono text-xs text-zinc-700">event_id={e.id}</p>
+                    <p className="mt-1 text-xs text-zinc-700">by={e.created_by || "unknown"}</p>
+                    {e.event_data ? (
+                      <details className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                        <summary className="cursor-pointer text-xs font-medium text-zinc-900">event_data</summary>
+                        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-zinc-700">
+                          {fmtJson(e.event_data)}
+                        </pre>
+                      </details>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
         </main>

@@ -124,10 +124,11 @@ memoriesRouter.put("/:id", async (c) => {
 
 // Delete memory
 memoriesRouter.delete("/:id", async (c) => {
-  const { tenantType, tenantId } = requireTenant(c);
+  const { tenantType, tenantId, actorId } = requireTenant(c);
   const id = c.req.param("id");
+  const now = new Date().toISOString();
   await withDbClient(c.env, async (db) => {
-    await deleteMemory(db, tenantType, tenantId, id);
+    await deleteMemory(db, { tenantType, tenantId, actorId, id, nowIso: now });
   });
   return c.json({ deleted: true });
 });
@@ -202,6 +203,7 @@ memoriesRouter.post("/:id/link", async (c) => {
 
     if (String(m1.project_id) !== String(m2.project_id)) throw new Error("Memories must be in the same project.");
 
+    const linkId = crypto.randomUUID();
     await db.query(
       `INSERT INTO entity_links (
          id, tenant_type, tenant_id,
@@ -209,14 +211,49 @@ memoriesRouter.post("/:id/link", async (c) => {
          relation, metadata, created_at, created_by
        )
        VALUES ($1, $2, $3, 'memory', $4::uuid, 'memory', $5::uuid, $6, $7::jsonb, $8, $9)`,
-      [crypto.randomUUID(), tenantType, tenantId, fromId, toId, relation, JSON.stringify(metadata), now, actorId]
+      [linkId, tenantType, tenantId, fromId, toId, relation, JSON.stringify(metadata), now, actorId]
+    );
+
+    // Record link creation on the source memory.
+    await db.query(
+      `INSERT INTO memory_events (
+         id, tenant_type, tenant_id, project_id, memory_id,
+         event_type, event_data, created_at, created_by
+       )
+       VALUES ($1, $2, $3, $4::uuid, $5::uuid, $6, $7::jsonb, $8, $9)`,
+      [
+        crypto.randomUUID(),
+        tenantType,
+        tenantId,
+        String(m1.project_id),
+        fromId,
+        "link_create",
+        JSON.stringify({ link_id: linkId, to_memory_id: toId, relation, metadata }),
+        now,
+        actorId,
+      ]
     );
 
     // If this is a "supersedes" relationship, mark the target memory as superseded (soft lifecycle).
     if (relation === "supersedes") {
+      await setMemoryLifecycle(db, { tenantType, tenantId, actorId, id: toId, state: "superseded", nowIso: now });
       await db.query(
-        "UPDATE memories SET state = 'superseded', updated_at = $1, updated_by = $2 WHERE id = $3 AND tenant_type = $4 AND tenant_id = $5",
-        [now, actorId, toId, tenantType, tenantId]
+        `INSERT INTO memory_events (
+           id, tenant_type, tenant_id, project_id, memory_id,
+           event_type, event_data, created_at, created_by
+         )
+         VALUES ($1, $2, $3, $4::uuid, $5::uuid, $6, $7::jsonb, $8, $9)`,
+        [
+          crypto.randomUUID(),
+          tenantType,
+          tenantId,
+          String(m2.project_id),
+          toId,
+          "superseded_by",
+          JSON.stringify({ link_id: linkId, from_memory_id: fromId }),
+          now,
+          actorId,
+        ]
       );
     }
   });
@@ -250,4 +287,30 @@ memoriesRouter.get("/:id/links", async (c) => {
   });
 
   return c.json({ inbound, outbound });
+});
+
+// List memory event history (audit trail).
+memoriesRouter.get("/:id/events", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const id = c.req.param("id");
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50"), 1), 200);
+
+  const events = await withDbClient(c.env, async (db) => {
+    const mRes = await db.query("SELECT id FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [id, tenantType, tenantId]);
+    if (mRes.rowCount === 0) return null;
+
+    const { rows } = await db.query(
+      `SELECT id, project_id, memory_id, event_type, event_data, created_at, created_by
+       FROM memory_events
+       WHERE tenant_type = $1 AND tenant_id = $2 AND memory_id = $3::uuid
+       ORDER BY created_at DESC
+       LIMIT $4`,
+      [tenantType, tenantId, id, limit]
+    );
+
+    return rows;
+  });
+
+  if (!events) return c.json({ error: "Memory not found" }, 404);
+  return c.json({ events });
 });
