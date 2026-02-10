@@ -1,0 +1,56 @@
+name: Publish Pajama CLI (npm)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "pajama-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-pajama
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Ensure npm supports Trusted Publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Validate tag matches package version
+        run: |
+          PKG_VERSION="$(node -p "require('./packages/pajama/package.json').version")"
+          EXPECTED_TAG="pajama-v${PKG_VERSION}"
+          echo "package version: ${PKG_VERSION}"
+          echo "tag: ${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
+            echo "Refusing to publish: tag must be ${EXPECTED_TAG}"
+            exit 1
+          fi
+
+      - name: Verify prebuilt binary exists (R2 download)
+        run: |
+          PKG_VERSION="$(node -p "require('./packages/pajama/package.json').version")"
+          BASE="https://api-game-dev-memory.pajamadot.com/downloads/pajama/v${PKG_VERSION}"
+          curl -fsI "${BASE}/pajama-win32-x64.exe" >/dev/null
+          curl -fsI "${BASE}/pajama-win32-x64.exe.sha256" >/dev/null
+
+      - name: Publish to npm (Trusted Publishing via OIDC)
+        working-directory: packages/pajama
+        run: npm publish
+

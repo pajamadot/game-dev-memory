@@ -15,6 +15,9 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "os": [
     "win32"
   ],
