@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
-import { SignInButton } from "@clerk/nextjs";
+import { OrganizationSwitcher, SignInButton, UserButton } from "@clerk/nextjs";
 import { apiJson } from "@/lib/memory-api";
 import { AgentClient } from "./AgentClient";
 
@@ -13,8 +13,20 @@ type ProjectRow = {
   description: string;
 };
 
+function ScopePill(props: { orgId: string | null }) {
+  const isOrg = Boolean(props.orgId);
+  const label = isOrg ? "Organization" : "Personal";
+  const badge = isOrg ? "shared" : "private";
+  const tone = isOrg ? "border-sky-200 bg-sky-50 text-sky-900" : "border-emerald-200 bg-emerald-50 text-emerald-900";
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${tone}`}>
+      {label} · {badge}
+    </span>
+  );
+}
+
 export default async function AgentPage() {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return (
@@ -58,8 +70,14 @@ export default async function AgentPage() {
             <p className="mt-1 text-sm text-zinc-600">
               Built on the Memory API and MCP. Org scope is shared across your team; personal scope stays private.
             </p>
+            {!orgId ? (
+              <p className="mt-1 text-xs text-zinc-600">
+                Tip: switch to an org to ask against shared project memory (use the org switcher on the right).
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <ScopePill orgId={orgId ?? null} />
             <Link
               href="/"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
@@ -78,6 +96,16 @@ export default async function AgentPage() {
             >
               CLI Docs
             </Link>
+            <OrganizationSwitcher
+              appearance={{
+                elements: {
+                  rootBox: "rounded-full border border-zinc-300 bg-white px-2 py-1",
+                },
+              }}
+            />
+            <div className="rounded-full border border-zinc-300 bg-white px-2 py-1">
+              <UserButton />
+            </div>
           </div>
         </header>
 
@@ -88,4 +116,3 @@ export default async function AgentPage() {
     </div>
   );
 }
-

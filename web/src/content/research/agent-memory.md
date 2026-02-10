@@ -6,6 +6,8 @@ This report summarizes practical patterns from recent agent-memory research and 
 - **Object store** for large artifacts (R2)
 - Optional **vector index** for semantic retrieval (Postgres + pgvector or a dedicated vector DB later)
 
+It also calls out a "gateway + control UI" pattern inspired by Cloudflare's `moltworker` (OpenClaw on Workers) and shows how that maps to a **Project Memory Agent** that is retrieval-first and evidence-driven.
+
 ## TL;DR
 
 1. Treat "memory" as **multiple layers**, not one blob: working (prompt context), episodic (session/event stream), semantic (facts/knowledge), procedural (how-to/tool policies), and artifact (large files).
@@ -118,6 +120,20 @@ Reflexion formalizes a loop of: act -> observe -> reflect -> improve behavior. F
 
 Source: Reflexion (Shinn et al., 2023).
 
+## A Moltworker-Inspired Agent Pattern (Gateway + Control UI)
+
+Cloudflare's `moltworker` packages an agent runtime behind a "gateway" and exposes a web-based control UI. The parts worth copying for a project-memory product are:
+
+- **Control UI**: one place to ask questions and inspect evidence.
+- **Gateway / API boundary**: a thin layer that mediates auth, retrieval, and tool calls.
+- **Persistence**: separate large files (object storage) from structured metadata (DB).
+
+For Game Dev Memory, we do not need the "agent-in-a-container" piece to start. Instead, we implement a **Project Memory Agent** as:
+
+- A **thin agent API** endpoint that performs retrieval over tenant-scoped memory (and optionally asks an LLM to synthesize an answer).
+- A **web UI route** that serves as the control panel for humans.
+- MCP remains a **thin tool layer** over the same underlying memory primitives.
+
 ## Mapping To This Repo's Current Architecture
 
 Today the system already supports the core primitives:
@@ -129,6 +145,11 @@ Today the system already supports the core primitives:
 - `entity_links` (generic evidence/relationship edges)
 - `evolution_events` (audit log)
 
+And now includes a first-cut **Project Memory Agent**:
+
+- `POST /api/agent/ask` (retrieval-first; optional LLM synthesis when configured)
+- `/agent` (web control UI)
+
 The most important missing piece for "semantic search" is an embeddings index. Minimal extension options:
 
 1. Add `memories.embedding` (vector) + `artifact_chunks.embedding` (vector) and use pgvector.
@@ -136,11 +157,12 @@ The most important missing piece for "semantic search" is an embeddings index. M
 
 ## Recommended Next Steps
 
-1. Replace temporary tenant headers with Clerk JWT verification in the API.
-2. Add Postgres full-text search for `memories` + `artifact_chunks.text`.
-3. Add optional embeddings and hybrid retrieval.
-4. Add an artifact upload + chunk viewer UI in the web console.
-5. Grow the evolver beyond summaries: dedupe, prune, confidence calibration, and cross-project "bridges" (within tenant).
+1. Add Postgres full-text search for `memories` and chunk text, and expose a hybrid ranking API (FTS + recency first).
+2. Add optional embeddings and hybrid retrieval (FTS + vector similarity), with tenant/project filters as hard constraints.
+3. Expand the `/agent` control UI with "Save as memory" (turn answers into durable semantic/procedural memories).
+4. Expand the `/agent` control UI with evidence deep links (memory + asset viewers).
+5. Add an artifact/asset viewer UI for chunked large files (range fetch + chunk text preview).
+6. Grow the evolver beyond summaries: dedupe, confidence calibration, and cross-project bridges within a tenant (org or personal).
 
 ## References
 
@@ -149,6 +171,7 @@ The most important missing piece for "semantic search" is an embeddings index. M
 - Shinn, N. et al. "Reflexion: Language Agents with Verbal Reinforcement Learning" (2023). arXiv:2303.11366. https://arxiv.org/abs/2303.11366
 - Yao, S. et al. "ReAct: Synergizing Reasoning and Acting in Language Models" (2022). arXiv:2210.03629. https://arxiv.org/abs/2210.03629
 - Wang, G. et al. "Voyager: An Open-Ended Embodied Agent with Large Language Models" (2023). arXiv:2305.16291. https://arxiv.org/abs/2305.16291
+- Cloudflare `moltworker` (OpenClaw on Workers): https://github.com/cloudflare/moltworker
 - LangGraph docs: Memory. https://langchain-ai.github.io/langgraph/concepts/memory/
 - LlamaIndex docs: Agent Memory. https://docs.llamaindex.ai/en/stable/understanding/agent/memory/
 - LangMem (LangChain) repo. https://github.com/langchain-ai/langmem
