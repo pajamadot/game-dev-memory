@@ -84,6 +84,25 @@ export function structureToList(structure: any): any[] {
   return [];
 }
 
+// Upstream helper: returns a list of nodes with child arrays removed (shallow copy).
+export function getNodes(structure: any): any[] {
+  if (structure && typeof structure === "object" && !Array.isArray(structure)) {
+    const node = { ...(structure as any) };
+    delete (node as any).nodes;
+    const nodes = [node];
+    for (const k of Object.keys(structure)) {
+      if (k.includes("nodes")) nodes.push(...getNodes((structure as any)[k]));
+    }
+    return nodes;
+  }
+  if (Array.isArray(structure)) {
+    const out: any[] = [];
+    for (const item of structure) out.push(...getNodes(item));
+    return out;
+  }
+  return [];
+}
+
 export function getLeafNodes(structure: any): any[] {
   if (structure && typeof structure === "object" && !Array.isArray(structure)) {
     const kids = (structure as any).nodes;
@@ -132,6 +151,10 @@ export function isLeafNode(data: any, nodeId: string): boolean {
 export function sanitizeFilename(filename: string, replacement = "-"): string {
   // Mirrors upstream behavior: only replace '/'.
   return String(filename || "").replaceAll("/", replacement);
+}
+
+export function getLastNode<T>(structure: T[]): T | undefined {
+  return Array.isArray(structure) && structure.length ? structure[structure.length - 1] : undefined;
 }
 
 export function convertPhysicalIndexToInt(data: any): any {
@@ -240,6 +263,73 @@ export function getTextOfPdfPagesWithLabels(pdfPages: Array<[string, number]>, s
     text += `<physical_index_${idx}>\n${p[0]}\n<physical_index_${idx}>\n`;
   }
   return text;
+}
+
+export function getFirstStartPageFromText(text: string): number {
+  const m = /<start_index_(\d+)>/.exec(String(text || ""));
+  return m ? parseInt(m[1], 10) : -1;
+}
+
+export function getLastStartPageFromText(text: string): number {
+  const src = String(text || "");
+  const re = /<start_index_(\d+)>/g;
+  let last = -1;
+  while (true) {
+    const m = re.exec(src);
+    if (!m) break;
+    last = parseInt(m[1], 10);
+  }
+  return last;
+}
+
+export function cleanStructurePost(data: any): any {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    delete (data as any).page_number;
+    delete (data as any).start_index;
+    delete (data as any).end_index;
+    if ((data as any).nodes) cleanStructurePost((data as any).nodes);
+    return data;
+  }
+  if (Array.isArray(data)) {
+    for (const section of data) cleanStructurePost(section);
+  }
+  return data;
+}
+
+export function removeFields(data: any, fields: string[] = ["text"]): any {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const out: any = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (fields.includes(k)) continue;
+      out[k] = removeFields(v, fields);
+    }
+    return out;
+  }
+  if (Array.isArray(data)) return data.map((x) => removeFields(x, fields));
+  return data;
+}
+
+export function printToc(tree: any[], indent = 0): void {
+  for (const node of tree || []) {
+    // eslint-disable-next-line no-console
+    console.log(`${"  ".repeat(indent)}${String((node as any).title || "")}`);
+    if ((node as any).nodes) printToc((node as any).nodes, indent + 1);
+  }
+}
+
+export function printJson(data: any, maxLen = 40, indent = 2): void {
+  const simplify = (obj: any): any => {
+    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+      const out: any = {};
+      for (const [k, v] of Object.entries(obj)) out[k] = simplify(v);
+      return out;
+    }
+    if (Array.isArray(obj)) return obj.map(simplify);
+    if (typeof obj === "string" && obj.length > maxLen) return `${obj.slice(0, maxLen)}...`;
+    return obj;
+  };
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify(simplify(data), null, indent));
 }
 
 export function removeStructureText(data: any): any {
@@ -438,6 +528,11 @@ export function validateAndTruncatePhysicalIndices(
   return tocWithPageNumber;
 }
 
+// Worker-friendly helper: compute token counts for provided page texts.
+export function getPageTokensFromTexts(pages: string[], model?: string): Array<[string, number]> {
+  return (pages || []).map((t) => [String(t || ""), countTokens(String(t || ""), model)] as [string, number]);
+}
+
 // Convenience: compute a depth-based `level` field for search.
 export function addDepthLevels(structure: PageIndexNode[], depth = 0): void {
   for (const node of structure || []) {
@@ -446,4 +541,3 @@ export function addDepthLevels(structure: PageIndexNode[], depth = 0): void {
     if (kids.length) addDepthLevels(kids, depth + 1);
   }
 }
-
