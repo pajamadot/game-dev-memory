@@ -261,6 +261,88 @@ memoriesRouter.post("/:id/link", async (c) => {
   return c.json({ ok: true, from_memory_id: fromId, to_memory_id: toId, relation, created_at: now });
 });
 
+// Link memory -> asset (entity_links). Useful for attaching logs, screenshots, builds, etc.
+memoriesRouter.post("/:id/attach-asset", async (c) => {
+  const { tenantType, tenantId, actorId } = requireTenant(c);
+  const memoryId = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+
+  const assetId = typeof body.asset_id === "string" && body.asset_id.trim() ? body.asset_id.trim() : null;
+  if (!assetId) return c.json({ ok: false, error: "asset_id is required" }, 400);
+
+  const relation = safeRelation(body.relation || "attachment");
+  const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+  const now = new Date().toISOString();
+
+  const out = await withDbClient(c.env, async (db) => {
+    const mRes = await db.query("SELECT id, project_id FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+      memoryId,
+      tenantType,
+      tenantId,
+    ]);
+    const mem = mRes.rows[0] ?? null;
+    if (!mem) throw new Error("Memory not found.");
+    const projectId = String(mem.project_id);
+
+    const aRes = await db.query("SELECT id, project_id FROM assets WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+      assetId,
+      tenantType,
+      tenantId,
+    ]);
+    const asset = aRes.rows[0] ?? null;
+    if (!asset) throw new Error("Asset not found.");
+    if (String(asset.project_id) !== projectId) throw new Error("Asset must be in the same project as the memory.");
+
+    const existing = await db.query(
+      `SELECT id
+       FROM entity_links
+       WHERE tenant_type = $1 AND tenant_id = $2
+         AND from_type = 'memory' AND from_id = $3::uuid
+         AND to_type = 'asset' AND to_id = $4::uuid
+         AND relation = $5
+       LIMIT 1`,
+      [tenantType, tenantId, memoryId, assetId, relation]
+    );
+
+    const linkId = existing.rows[0]?.id ? String(existing.rows[0].id) : crypto.randomUUID();
+
+    if (existing.rowCount === 0) {
+      await db.query(
+        `INSERT INTO entity_links (
+           id, tenant_type, tenant_id,
+           from_type, from_id, to_type, to_id,
+           relation, metadata, created_at, created_by
+         )
+         VALUES ($1, $2, $3, 'memory', $4::uuid, 'asset', $5::uuid, $6, $7::jsonb, $8, $9)`,
+        [linkId, tenantType, tenantId, memoryId, assetId, relation, JSON.stringify(metadata), now, actorId]
+      );
+
+      await db.query(
+        `INSERT INTO memory_events (
+           id, tenant_type, tenant_id, project_id, memory_id,
+           event_type, event_data, created_at, created_by
+         )
+         VALUES ($1, $2, $3, $4::uuid, $5::uuid, $6, $7::jsonb, $8, $9)`,
+        [
+          crypto.randomUUID(),
+          tenantType,
+          tenantId,
+          projectId,
+          memoryId,
+          "asset_attach",
+          JSON.stringify({ link_id: linkId, asset_id: assetId, relation, metadata }),
+          now,
+          actorId,
+        ]
+      );
+    }
+
+    return { linkId, projectId };
+  });
+
+  return c.json({ ok: true, memory_id: memoryId, asset_id: assetId, relation, link_id: out.linkId, created_at: now });
+});
+
 // List inbound/outbound memory links for UI/debugging.
 memoriesRouter.get("/:id/links", async (c) => {
   const { tenantType, tenantId } = requireTenant(c);

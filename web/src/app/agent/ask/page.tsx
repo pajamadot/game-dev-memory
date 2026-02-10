@@ -20,7 +20,7 @@ function ScopePill(props: { orgId: string | null }) {
   const tone = isOrg ? "border-sky-200 bg-sky-50 text-sky-900" : "border-emerald-200 bg-emerald-50 text-emerald-900";
   return (
     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${tone}`}>
-      {label} 路 {badge}
+      {label} | {badge}
     </span>
   );
 }

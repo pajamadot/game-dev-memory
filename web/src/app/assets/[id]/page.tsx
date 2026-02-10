@@ -181,7 +181,7 @@ export default async function AssetPage(props: { params: Promise<{ id: string }>
             <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">ASSET</p>
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{name}</h1>
             <p className="mt-1 text-xs text-zinc-600">
-              {asset.content_type} · {bytes(Number(asset.byte_size || 0))} · status {asset.status}
+              {asset.content_type} | {bytes(Number(asset.byte_size || 0))} | status {asset.status}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -248,7 +248,7 @@ export default async function AssetPage(props: { params: Promise<{ id: string }>
                         {m.title}
                       </Link>
                       <p className="text-[11px] text-zinc-500">
-                        {m.category} · updated {fmt(m.updated_at)}
+                        {m.category} | updated {fmt(m.updated_at)}
                       </p>
                     </div>
                     <p className="mt-2 break-words font-mono text-xs text-zinc-700">{m.id}</p>

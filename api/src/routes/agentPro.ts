@@ -31,7 +31,7 @@ function excerpt(s: string, max: number): string {
 
 function safeSessionTitle(v: unknown): string {
   const s = typeof v === "string" ? v.trim() : "";
-  if (!s) return "Pro Agent Session";
+  if (!s) return "Agent Session";
   return s.slice(0, 140);
 }
 
@@ -123,7 +123,7 @@ agentProRouter.get("/sessions", async (c) => {
     project_id: String(s.project_id),
     started_at: String(s.started_at || ""),
     ended_at: s.ended_at ? String(s.ended_at) : null,
-    title: sessionTitleFromContext(s.context) || "Pro Agent Session",
+    title: sessionTitleFromContext(s.context) || "Agent Session",
   }));
 
   return c.json({ sessions: out });
@@ -193,7 +193,7 @@ agentProRouter.get("/sessions/:id", async (c) => {
     project_id: String(session.project_id),
     started_at: String(session.started_at || ""),
     ended_at: session.ended_at ? String(session.ended_at) : null,
-    title: sessionTitleFromContext(session.context) || "Pro Agent Session",
+    title: sessionTitleFromContext(session.context) || "Agent Session",
     message_count: messageCount,
   });
 });

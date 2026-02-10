@@ -174,7 +174,7 @@ pajama login
                   >
                     Full CLI docs
                   </Link>
-                  <span className="mx-2 text-zinc-300">·</span>
+                  <span className="mx-2 text-zinc-300">|</span>
                   <Link
                     href="/docs/skills"
                     className="text-xs font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
@@ -228,7 +228,7 @@ pajama login
           </div>
           <div className="flex items-center gap-3">
             <Pill tone={scope.tone}>
-              {scope.label} · {scope.badge}
+              {scope.label} | {scope.badge}
             </Pill>
             <Link
               href="/team"
@@ -359,7 +359,7 @@ pajama login
               )}
             </Card>
 
-            <Card title="New project" hint={`${scope.label} scope · ${scope.badge}`}>
+            <Card title="New project" hint={`${scope.label} scope | ${scope.badge}`}>
               <form action={createProject} className="space-y-3">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-zinc-700" htmlFor="project-name">
@@ -449,7 +449,7 @@ pajama login
           </div>
 
           <div className="space-y-6 lg:col-span-8">
-            <Card title="New memory" hint={`${scope.label} scope · ${scope.badge}`}>
+            <Card title="New memory" hint={`${scope.label} scope | ${scope.badge}`}>
               {projects.length === 0 ? (
                 <p className="text-sm text-zinc-600">Create a project first.</p>
               ) : (

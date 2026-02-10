@@ -47,6 +47,32 @@ type StoredPageIndex = {
   };
 };
 
+function findNodeWithPath(
+  roots: PageIndexNode[],
+  targetNodeId: string
+): { node: any; path: Array<{ node_id: string; title: string }> } | null {
+  const target = String(targetNodeId || "").trim();
+  if (!target) return null;
+
+  const walk = (nodes: any[], path: Array<{ node_id: string; title: string }>): any => {
+    for (const n of nodes || []) {
+      if (!n || typeof n !== "object") continue;
+      const node_id = String((n as any).node_id || "");
+      const title = String((n as any).title || "");
+      const nextPath = [...path, { node_id, title }];
+      if (node_id === target) return { node: n, path: nextPath };
+      const kids = (n as any).nodes;
+      if (Array.isArray(kids) && kids.length) {
+        const r = walk(kids, nextPath);
+        if (r) return r;
+      }
+    }
+    return null;
+  };
+
+  return walk(roots as any, []);
+}
+
 function pageIndexLlmFromEnv(env: AppEnv["Bindings"]): PageIndexLlm {
   return {
     complete: async (opts) => {
@@ -117,10 +143,24 @@ artifactsRouter.get("/", async (c) => {
   const sessionId = c.req.query("session_id");
   const type = c.req.query("type");
   const limit = parseInt(c.req.query("limit") || "50");
+  const includeMetadata = (() => {
+    const v = (c.req.query("include_metadata") || c.req.query("metadata") || "").trim().toLowerCase();
+    return v === "1" || v === "true" || v === "yes" || v === "on";
+  })();
 
   const artifacts = await withDbClient(c.env, async (db) => {
     const params: unknown[] = [tenantType, tenantId];
-    let q = "SELECT * FROM artifacts WHERE tenant_type = $1 AND tenant_id = $2";
+    // metadata can be very large (pageindex). Default to summary rows unless explicitly requested.
+    const select = includeMetadata
+      ? "SELECT *"
+      : `SELECT
+           id, tenant_type, tenant_id, project_id, session_id,
+           type, storage_mode, r2_bucket, r2_key, r2_prefix,
+           content_type, byte_size, sha256,
+           COALESCE(metadata, '{}'::jsonb) ? 'pageindex' AS has_pageindex,
+           created_at, created_by`;
+
+    let q = `${select} FROM artifacts WHERE tenant_type = $1 AND tenant_id = $2`;
 
     if (projectId) {
       params.push(projectId);
@@ -511,6 +551,50 @@ artifactsRouter.get("/:id/pageindex", async (c) => {
   if (!pageindex) return c.json({ error: "No pageindex for artifact" }, 404);
 
   return c.json({ ok: true, artifact_id: String((artifact as any).id), project_id: String((artifact as any).project_id), pageindex });
+});
+
+// Fetch a single node (plus breadcrumbs) from the stored pageindex.
+// This avoids shipping the entire tree to clients when they only need a referenced node.
+artifactsRouter.get("/:id/pageindex/node/:nodeId", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const id = c.req.param("id");
+  const nodeId = c.req.param("nodeId");
+
+  const artifact = await withDbClient(c.env, async (db) => {
+    const { rows } = await db.query(
+      "SELECT id, project_id, metadata FROM artifacts WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3",
+      [id, tenantType, tenantId]
+    );
+    return rows[0] ?? null;
+  });
+
+  if (!artifact) return c.json({ error: "Artifact not found" }, 404);
+  const meta = parseJsonMaybe((artifact as any).metadata) || {};
+  const pageindex = meta.pageindex as StoredPageIndex | undefined;
+  if (!pageindex || !Array.isArray((pageindex as any).roots)) return c.json({ error: "No pageindex for artifact" }, 404);
+
+  const found = findNodeWithPath((pageindex as any).roots || [], nodeId);
+  if (!found) return c.json({ error: "Node not found in pageindex", node_id: String(nodeId) }, 404);
+
+  const nodeAny = found.node as any;
+  const node = { ...nodeAny } as any;
+  const childrenAny = Array.isArray(nodeAny.nodes) ? (nodeAny.nodes as any[]) : [];
+  delete node.nodes;
+
+  const children = childrenAny.slice(0, 200).map((c) => ({
+    node_id: String((c as any).node_id || ""),
+    title: String((c as any).title || ""),
+  }));
+
+  return c.json({
+    ok: true,
+    artifact_id: String((artifact as any).id),
+    project_id: String((artifact as any).project_id),
+    node_id: String((nodeAny as any).node_id || nodeId),
+    path: found.path,
+    node,
+    children,
+  });
 });
 
 // Build/rebuild a pageindex for an artifact.

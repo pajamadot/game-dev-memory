@@ -44,7 +44,7 @@ pajama projects list
           <Link className="font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800" href="/docs/cli">
             Full CLI docs
           </Link>
-          <span className="mx-2 text-zinc-400">·</span>
+          <span className="mx-2 text-zinc-400">|</span>
           <Link className="font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800" href="/docs/skills">
             Agent skills install
           </Link>

@@ -342,9 +342,13 @@ export function StreamingAgentChatClient(props: {
                           {ev.docRefs.length ? (
                             <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-zinc-700">
                               {ev.docRefs.slice(0, 12).map((ref) => (
-                                <span key={ref} className="font-mono">
+                                <Link
+                                  key={ref}
+                                  href={`/artifacts/${encodeURIComponent(ref.split("#")[0])}?node=${encodeURIComponent(ref.split("#")[1] || "")}`}
+                                  className="font-mono underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
+                                >
                                   doc:{ref}
-                                </span>
+                                </Link>
                               ))}
                             </div>
                           ) : null}

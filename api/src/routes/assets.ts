@@ -78,26 +78,39 @@ assetsRouter.get("/", async (c) => {
   const projectId = c.req.query("project_id");
   const memoryId = c.req.query("memory_id");
   const status = c.req.query("status");
+  const searchRaw = c.req.query("q") || c.req.query("search") || "";
+  const searchQ = searchRaw ? searchRaw.trim() : "";
   const limit = clampInt(c.req.query("limit"), 50, 1, 200);
   const includeMemoryLinks = truthyQuery(c.req.query("include_memory_links") || c.req.query("include_links"));
 
   const assets = await withDbClient(c.env, async (db) => {
     const params: unknown[] = [tenantType, tenantId];
-    let q = "SELECT a.* FROM assets a WHERE a.tenant_type = $1 AND a.tenant_id = $2";
+    let sql = "SELECT a.* FROM assets a WHERE a.tenant_type = $1 AND a.tenant_id = $2";
 
     if (projectId) {
       params.push(projectId);
-      q += ` AND a.project_id = $${params.length}`;
+      sql += ` AND a.project_id = $${params.length}`;
     }
 
     if (status) {
       params.push(status);
-      q += ` AND a.status = $${params.length}`;
+      sql += ` AND a.status = $${params.length}`;
+    }
+
+    if (searchQ) {
+      // Search by original filename or storage key suffix.
+      // Keep this simple and deterministic (no embeddings here).
+      const like = `%${searchQ.replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+      params.push(like);
+      sql += ` AND (
+        (a.original_name IS NOT NULL AND a.original_name ILIKE $${params.length} ESCAPE '\\\\')
+        OR a.r2_key ILIKE $${params.length} ESCAPE '\\\\'
+      )`;
     }
 
     if (memoryId) {
       params.push(memoryId);
-      q += ` AND EXISTS (
+      sql += ` AND EXISTS (
         SELECT 1 FROM entity_links l
         WHERE l.tenant_type = $1 AND l.tenant_id = $2
           AND l.from_type = 'memory'
@@ -108,10 +121,10 @@ assetsRouter.get("/", async (c) => {
     }
 
     params.push(limit);
-    q += ` ORDER BY a.created_at DESC LIMIT $${params.length}`;
+    sql += ` ORDER BY a.created_at DESC LIMIT $${params.length}`;
 
     if (!includeMemoryLinks) {
-      const { rows } = await db.query(q, params);
+      const { rows } = await db.query(sql, params);
       return rows;
     }
 
@@ -120,7 +133,7 @@ assetsRouter.get("/", async (c) => {
     // We keep the base selection + paging deterministic, then join link aggregates.
     const full = `
       WITH base AS (
-        ${q}
+        ${sql}
       )
       SELECT
         base.*,

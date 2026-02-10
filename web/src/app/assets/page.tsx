@@ -237,7 +237,7 @@ pajama assets upload --project-id &lt;PROJECT_ID&gt; --path &lt;FILE&gt; --memor
                 <div>
                   <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Files</h2>
                   <p className="mt-1 text-xs text-zinc-600">
-                    {assets.length} shown · scope: {titleProject}
+                    {assets.length} shown | scope: {titleProject}
                   </p>
                 </div>
               </div>

@@ -103,7 +103,7 @@ export default async function AgentSessionPage(props: { params: Promise<{ id: st
             <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">AGENT SESSION</p>
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{session.title || "Agent Session"}</h1>
             <p className="mt-1 text-xs text-zinc-600">
-              messages {session.message_count} · started {fmt(session.started_at)}
+              messages {session.message_count} | started {fmt(session.started_at)}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

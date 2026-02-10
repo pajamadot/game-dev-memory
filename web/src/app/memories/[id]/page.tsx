@@ -186,7 +186,7 @@ export default async function MemoryPage(props: { params: Promise<{ id: string }
             <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">MEMORY</p>
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{memory.title}</h1>
             <p className="mt-1 text-xs text-zinc-600">
-              {memory.category} · conf {Math.round(Number(memory.confidence || 0) * 100)}% · updated {fmt(memory.updated_at)}
+              {memory.category} | conf {Math.round(Number(memory.confidence || 0) * 100)}% | updated {fmt(memory.updated_at)}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${stateTone}`}>

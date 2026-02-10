@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 /**
- * Project Memory Pro Agent (Sandbox Runner)
+ * Project Memory Agent (Sandbox Runner)
  *
  * This runs inside Cloudflare Sandbox Containers and communicates with the
  * Memory API over HTTP (Authorization is passed through from the gateway worker).
@@ -418,13 +418,105 @@ async function main(): Promise<void> {
           additionalProperties: false,
         },
       },
+      {
+        name: "list_assets",
+        description:
+          "List project assets (files) and optionally filter by filename query or status. Use this to find logs/build outputs to read and attach as evidence.",
+        input_schema: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", description: "Optional project id override (defaults to the current session project)." },
+            q: { type: "string", description: "Optional search query (matches filename and storage key)." },
+            status: { type: "string", description: "Optional status filter (e.g. ready|uploading|aborted)." },
+            limit: { type: "integer", minimum: 1, maximum: 200 },
+            include_memory_links: { type: "boolean", description: "Include linked memory summaries for each asset." },
+          },
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "record_memory",
+        description:
+          "Record durable project memory (note/bug/decision/pattern/summary). Use this when the user asks you to save conclusions so the team can retrieve them later.",
+        input_schema: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", description: "Optional project id override (defaults to the current session project)." },
+            category: { type: "string", description: "Memory category (e.g. note, bug, decision, pattern, architecture, lesson, summary)." },
+            title: { type: "string" },
+            content: { type: "string" },
+            tags: { type: "array", items: { type: "string" } },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+          },
+          required: ["title", "content"],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "attach_asset_to_memory",
+        description:
+          "Attach an existing asset (file) to a memory so future retrieval includes it as evidence (logs, screenshots, build artifacts).",
+        input_schema: {
+          type: "object",
+          properties: {
+            memory_id: { type: "string" },
+            asset_id: { type: "string" },
+            relation: { type: "string", description: "Optional relation label (default: attachment)." },
+          },
+          required: ["memory_id", "asset_id"],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "list_artifacts",
+        description:
+          "List project artifacts (documents). Use this to find indexed docs and then read specific PageIndex nodes.",
+        input_schema: {
+          type: "object",
+          properties: {
+            project_id: { type: "string", description: "Optional project id override (defaults to the current session project)." },
+            type: { type: "string", description: "Optional artifact type filter." },
+            limit: { type: "integer", minimum: 1, maximum: 200 },
+          },
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "index_artifact_pageindex",
+        description:
+          "Build/rebuild a PageIndex for an artifact so it can be retrieved and cited as [doc:<artifact>#<node>].",
+        input_schema: {
+          type: "object",
+          properties: {
+            artifact_id: { type: "string" },
+            kind: { type: "string", description: "Index kind: auto|markdown|chunks|pageindex_md|pageindex_pdf" },
+          },
+          required: ["artifact_id"],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "read_document_node",
+        description:
+          "Read one PageIndex node from an artifact (breadcrumb path + node fields). Use this to quote specific doc sections as evidence.",
+        input_schema: {
+          type: "object",
+          properties: {
+            artifact_id: { type: "string" },
+            node_id: { type: "string" },
+          },
+          required: ["artifact_id", "node_id"],
+          additionalProperties: false,
+        },
+      },
     ];
 
     const system = [
       "You are PajamaDot Game Dev Agent (Claude Code-like tool agent) running in a sandbox.",
       "You are chatting with a user about a game-dev project.",
-      "You have access to tools to search project memories and to read chunks of text assets (logs/config).",
+      "You have access to tools to search project memories, list/read assets (files), list/index/read artifacts (docs), and record durable memories.",
       "Use ONLY project memories and asset contents/metadata as evidence.",
+      "Only record new memories or attach files when the user asks you to (or when it's an explicit next step and you call it out).",
       "If evidence is insufficient, say so and propose exactly what to record/upload next.",
       "Cite memories as [mem:<uuid>] and assets as [asset:<uuid>] when used.",
       "Cite documents as [doc:<artifact_uuid>#<node_id>] when used.",
@@ -612,6 +704,243 @@ async function main(): Promise<void> {
             });
 
             trace({ type: "tool_result", sessionId, name, ok: true, bytes: bytes.length });
+            continue;
+          }
+
+          if (name === "list_assets") {
+            const anyInput = (input && typeof input === "object" ? (input as any) : {}) as any;
+            const pid = typeof anyInput.project_id === "string" && anyInput.project_id.trim() ? anyInput.project_id.trim() : projectId;
+            const q = typeof anyInput.q === "string" ? anyInput.q.trim() : "";
+            const status = typeof anyInput.status === "string" ? anyInput.status.trim() : "";
+            const lim = clampInt(String(anyInput.limit ?? ""), 30, 1, 200);
+            const includeLinks = typeof anyInput.include_memory_links === "boolean" ? anyInput.include_memory_links : false;
+
+            const qs: string[] = [];
+            if (pid) qs.push(`project_id=${encodeURIComponent(pid)}`);
+            if (q) qs.push(`q=${encodeURIComponent(q)}`);
+            if (status) qs.push(`status=${encodeURIComponent(status)}`);
+            if (includeLinks) qs.push(`include_memory_links=true`);
+            qs.push(`limit=${encodeURIComponent(String(lim))}`);
+
+            const data = await memoryApiJson(apiBaseUrl, authorization, `/api/assets?${qs.join("&")}`, { method: "GET" });
+            const assets = Array.isArray(data?.assets) ? (data.assets as any[]) : [];
+
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({
+                ok: true,
+                count: assets.length,
+                assets: assets.slice(0, Math.min(50, assets.length)).map((a) => ({
+                  id: String(a.id || ""),
+                  project_id: String(a.project_id || ""),
+                  status: String(a.status || ""),
+                  content_type: String(a.content_type || ""),
+                  byte_size: Number(a.byte_size || 0),
+                  original_name: a.original_name ? String(a.original_name) : null,
+                  created_at: String(a.created_at || ""),
+                  linked_memory_count: typeof a.linked_memory_count === "number" ? a.linked_memory_count : undefined,
+                })),
+              }),
+            });
+
+            trace({ type: "tool_result", sessionId, name, ok: true, assets: assets.length });
+            continue;
+          }
+
+          if (name === "record_memory") {
+            const anyInput = (input && typeof input === "object" ? (input as any) : {}) as any;
+            const pid = typeof anyInput.project_id === "string" && anyInput.project_id.trim() ? anyInput.project_id.trim() : projectId;
+            const category = typeof anyInput.category === "string" && anyInput.category.trim() ? anyInput.category.trim() : "note";
+            const title = typeof anyInput.title === "string" ? anyInput.title.trim() : "";
+            const content = typeof anyInput.content === "string" ? anyInput.content.trim() : "";
+            if (!title) throw new Error("title is required");
+            if (!content) throw new Error("content is required");
+            const confidence =
+              typeof anyInput.confidence === "number" && Number.isFinite(anyInput.confidence)
+                ? Math.max(0, Math.min(1, anyInput.confidence))
+                : 0.6;
+
+            const tagsIn = anyInput.tags;
+            const tags =
+              Array.isArray(tagsIn)
+                ? tagsIn.filter((t: any) => typeof t === "string" && t.trim()).map((t: string) => t.trim()).slice(0, 32)
+                : [];
+
+            const created = await memoryApiJson(apiBaseUrl, authorization, "/api/memories", {
+              method: "POST",
+              body: JSON.stringify({
+                project_id: pid,
+                session_id: null,
+                category,
+                source_type: "agent_pro",
+                title,
+                content,
+                tags,
+                context: { recorded_by: "agent_pro", agent_session_id: sessionId },
+                confidence,
+              }),
+            });
+
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({ ok: true, memory_id: String(created?.id || ""), created_at: created?.created_at || null }),
+            });
+
+            trace({ type: "tool_result", sessionId, name, ok: true, memory_id: String(created?.id || "") });
+            continue;
+          }
+
+          if (name === "attach_asset_to_memory") {
+            const anyInput = (input && typeof input === "object" ? (input as any) : {}) as any;
+            const memoryId = typeof anyInput.memory_id === "string" ? anyInput.memory_id.trim() : "";
+            const assetId = typeof anyInput.asset_id === "string" ? anyInput.asset_id.trim() : "";
+            const relation = typeof anyInput.relation === "string" && anyInput.relation.trim() ? anyInput.relation.trim() : "attachment";
+            if (!memoryId) throw new Error("memory_id is required");
+            if (!assetId) throw new Error("asset_id is required");
+
+            const linked = await memoryApiJson(
+              apiBaseUrl,
+              authorization,
+              `/api/memories/${encodeURIComponent(memoryId)}/attach-asset`,
+              {
+                method: "POST",
+                body: JSON.stringify({ asset_id: assetId, relation }),
+              }
+            );
+
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({ ok: true, link_id: linked?.link_id || null }),
+            });
+
+            trace({ type: "tool_result", sessionId, name, ok: true, memory_id: memoryId, asset_id: assetId });
+            continue;
+          }
+
+          if (name === "list_artifacts") {
+            const anyInput = (input && typeof input === "object" ? (input as any) : {}) as any;
+            const pid = typeof anyInput.project_id === "string" && anyInput.project_id.trim() ? anyInput.project_id.trim() : projectId;
+            const type = typeof anyInput.type === "string" ? anyInput.type.trim() : "";
+            const lim = clampInt(String(anyInput.limit ?? ""), 30, 1, 200);
+
+            const qs: string[] = [];
+            if (pid) qs.push(`project_id=${encodeURIComponent(pid)}`);
+            if (type) qs.push(`type=${encodeURIComponent(type)}`);
+            qs.push(`limit=${encodeURIComponent(String(lim))}`);
+            qs.push("include_metadata=false");
+
+            const data = await memoryApiJson(apiBaseUrl, authorization, `/api/artifacts?${qs.join("&")}`, { method: "GET" });
+            const artifacts = Array.isArray(data?.artifacts) ? (data.artifacts as any[]) : [];
+
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({
+                ok: true,
+                count: artifacts.length,
+                artifacts: artifacts.slice(0, Math.min(50, artifacts.length)).map((a) => ({
+                  id: String(a.id || ""),
+                  project_id: String(a.project_id || ""),
+                  type: String(a.type || ""),
+                  storage_mode: String(a.storage_mode || ""),
+                  content_type: String(a.content_type || ""),
+                  byte_size: Number(a.byte_size || 0),
+                  has_pageindex: Boolean((a as any).has_pageindex),
+                  created_at: String(a.created_at || ""),
+                })),
+              }),
+            });
+
+            trace({ type: "tool_result", sessionId, name, ok: true, artifacts: artifacts.length });
+            continue;
+          }
+
+          if (name === "index_artifact_pageindex") {
+            const anyInput = (input && typeof input === "object" ? (input as any) : {}) as any;
+            const artifactId = typeof anyInput.artifact_id === "string" ? anyInput.artifact_id.trim() : "";
+            if (!artifactId) throw new Error("artifact_id is required");
+            const kind = typeof anyInput.kind === "string" && anyInput.kind.trim() ? anyInput.kind.trim() : "auto";
+
+            const data = await memoryApiJson(
+              apiBaseUrl,
+              authorization,
+              `/api/artifacts/${encodeURIComponent(artifactId)}/pageindex`,
+              { method: "POST", body: JSON.stringify({ kind }) }
+            );
+
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({
+                ok: true,
+                artifact_id: String(data?.artifact_id || artifactId),
+                kind: String(data?.pageindex?.kind || kind),
+                node_count: Number(data?.pageindex?.node_count || 0),
+              }),
+            });
+
+            trace({ type: "tool_result", sessionId, name, ok: true, artifact_id: artifactId });
+            continue;
+          }
+
+          if (name === "read_document_node") {
+            const anyInput = (input && typeof input === "object" ? (input as any) : {}) as any;
+            const artifactId = typeof anyInput.artifact_id === "string" ? anyInput.artifact_id.trim() : "";
+            const nodeId = typeof anyInput.node_id === "string" ? anyInput.node_id.trim() : "";
+            if (!artifactId) throw new Error("artifact_id is required");
+            if (!nodeId) throw new Error("node_id is required");
+
+            const data = await memoryApiJson(
+              apiBaseUrl,
+              authorization,
+              `/api/artifacts/${encodeURIComponent(artifactId)}/pageindex/node/${encodeURIComponent(nodeId)}`,
+              { method: "GET" }
+            );
+
+            // Add this node into the document evidence set so it is persisted as part of the assistant message evidence.
+            const title = typeof data?.node?.title === "string" ? data.node.title : typeof data?.node?.name === "string" ? data.node.name : "";
+            const excerptText =
+              typeof data?.node?.excerpt === "string"
+                ? data.node.excerpt
+                : typeof data?.node?.text === "string"
+                  ? excerpt(String(data.node.text), 900)
+                  : typeof data?.node?.summary === "string"
+                    ? excerpt(String(data.node.summary), 900)
+                    : "";
+
+            const docEntry: RetrievedDocument = {
+              kind: "pageindex",
+              artifact_id: String(data?.artifact_id || artifactId),
+              project_id: String(data?.project_id || projectId),
+              node_id: String(data?.node_id || nodeId),
+              title: title || String(data?.node_id || nodeId),
+              path: Array.isArray(data?.path) ? data.path.map((p: any) => String(p?.title || "")).filter(Boolean) : [],
+              excerpt: excerptText,
+              score: 100,
+            };
+
+            const docs = Array.isArray((mergedRetrieved as any).documents) ? ((mergedRetrieved as any).documents as any[]) : ((mergedRetrieved as any).documents = []);
+            const key = `${docEntry.artifact_id}#${docEntry.node_id}`;
+            const seen = new Set(docs.map((d: any) => `${String(d?.artifact_id)}#${String(d?.node_id)}`));
+            if (!seen.has(key)) docs.push(docEntry as any);
+
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: JSON.stringify({
+                ok: true,
+                artifact_id: docEntry.artifact_id,
+                node_id: docEntry.node_id,
+                path: data?.path || [],
+                node: data?.node || null,
+                children: data?.children || [],
+              }),
+            });
+
+            trace({ type: "tool_result", sessionId, name, ok: true, artifact_id: artifactId, node_id: nodeId });
             continue;
           }
 
