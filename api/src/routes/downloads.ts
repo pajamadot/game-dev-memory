@@ -49,5 +49,4 @@ export const downloadsRouter = new Hono<AppEnv>();
 
 // Public binary distribution for the `pajama` CLI (used by the npm installer).
 downloadsRouter.get("/pajama/:version/:file", handlePajamaDownload);
-downloadsRouter.head("/pajama/:version/:file", handlePajamaDownload);
-
+downloadsRouter.on("HEAD", "/pajama/:version/:file", handlePajamaDownload);
