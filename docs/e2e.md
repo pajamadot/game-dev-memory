@@ -32,7 +32,7 @@ npm run e2e
 Run against production deployment (no local server):
 
 ```powershell
-$env:PLAYWRIGHT_BASE_URL = "https://game-dev-memory.vercel.app"
+$env:PLAYWRIGHT_BASE_URL = "https://game-dev-memory.pajamadot.com"
 $env:E2E_START_SERVER = "false"
 npm run e2e
 ```
@@ -65,4 +65,3 @@ We intentionally keep this as a second step:
 
 - It requires enabling Browser Rendering in the Cloudflare account.
 - It adds operational cost and new failure modes.
-

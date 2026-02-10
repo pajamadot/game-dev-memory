@@ -11,7 +11,7 @@ This skill validates the web UX end-to-end using Playwright.
 ## Run (Production Smoke)
 
 ```powershell
-$env:PLAYWRIGHT_BASE_URL = "https://game-dev-memory.vercel.app"
+$env:PLAYWRIGHT_BASE_URL = "https://game-dev-memory.pajamadot.com"
 $env:E2E_START_SERVER = "false"
 npm run e2e
 ```
@@ -46,4 +46,3 @@ When tests fail, treat them as memory signals:
 See:
 
 - `docs/e2e.md`
-

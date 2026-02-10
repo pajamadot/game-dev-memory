@@ -45,7 +45,7 @@ Set these in the Vercel project settings:
 
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
-- `NEXT_PUBLIC_MEMORY_API_URL` (optional; defaults to the deployed Worker URL)
+- `NEXT_PUBLIC_MEMORY_API_URL` (recommended: `https://api.game-dev-memory.pajamadot.com`)
 
 ## API (Cloudflare Workers)
 
@@ -83,7 +83,18 @@ MCP OAuth `/authorize` redirects to the web consent page using the Worker var:
 
 - `WEBSITE_URL`
 
-In production this should be `https://game-dev-memory.vercel.app`.
+In production this should be `https://game-dev-memory.pajamadot.com`.
+
+## Custom Domains
+
+The Worker is bound to:
+
+- `https://api.game-dev-memory.pajamadot.com` (Memory API base)
+- `https://mcp.game-dev-memory.pajamadot.com` (MCP + OAuth issuer)
+
+The web console is served at:
+
+- `https://game-dev-memory.pajamadot.com`
 
 ## Local Notes
 

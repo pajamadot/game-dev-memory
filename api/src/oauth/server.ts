@@ -10,7 +10,7 @@ export function oauthIssuerFromRequest(request: Request): string {
 }
 
 export function websiteUrl(env: Env): string {
-  return (env.WEBSITE_URL && env.WEBSITE_URL.trim()) || "https://game-dev-memory.vercel.app";
+  return (env.WEBSITE_URL && env.WEBSITE_URL.trim()) || "https://game-dev-memory.pajamadot.com";
 }
 
 export function getOAuthMetadata(request: Request, _env: Env): Record<string, unknown> {
