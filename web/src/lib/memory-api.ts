@@ -4,7 +4,7 @@ function baseUrl(): string {
   return (
     process.env.MEMORY_API_URL ||
     process.env.NEXT_PUBLIC_MEMORY_API_URL ||
-    "https://game-dev-memory-api.radiantclay.workers.dev"
+    "https://api-game-dev-memory.pajamadot.com"
   );
 }
 
