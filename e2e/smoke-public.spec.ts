@@ -29,6 +29,22 @@ test.describe("Public UX smoke", () => {
     ).toBeVisible();
   });
 
+  test("agent page (logged out) renders", async ({ page }) => {
+    await page.goto("/agent");
+    await expect(page.getByRole("heading", { name: /Project Memory Agent/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
+  });
+
+  test("memory + asset viewers (logged out) render", async ({ page }) => {
+    const fake = "00000000-0000-0000-0000-000000000000";
+
+    await page.goto(`/memories/${fake}`);
+    await expect(page.getByRole("heading", { name: /Sign in required/i })).toBeVisible();
+
+    await page.goto(`/assets/${fake}`);
+    await expect(page.getByRole("heading", { name: /Sign in required/i })).toBeVisible();
+  });
+
   test("oauth authorize page (logged out) renders", async ({ page }) => {
     const params = new URLSearchParams({
       client_id: "pajama_e2e_test",
