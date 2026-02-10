@@ -1,12 +1,16 @@
 import type { Client } from "pg";
 import type { TenantType } from "../tenant";
 
+export type MemoryState = "active" | "superseded" | "quarantined";
+export type MemoryQuality = "unknown" | "good" | "bad";
+
 export interface ListMemoriesQuery {
   projectId?: string | null;
   category?: string | null;
   search?: string | null;
   tag?: string | null;
   sessionId?: string | null;
+  states?: MemoryState[] | null;
   limit?: number | null;
 }
 
@@ -21,6 +25,7 @@ export async function listMemories(
   const search = q.search || null;
   const tag = q.tag || null;
   const sessionId = q.sessionId || null;
+  const states = q.states;
   const limit = Math.min(Math.max(q.limit || 50, 1), 200);
 
   let query = "SELECT * FROM memories WHERE tenant_type = $1 AND tenant_id = $2";
@@ -30,6 +35,16 @@ export async function listMemories(
     params.push(projectId);
     query += ` AND project_id = $${params.length}`;
   }
+
+  // Default to active memories only unless caller explicitly requests otherwise.
+  // This prevents quarantined/superseded items from poisoning retrieval by accident.
+  const effectiveStates =
+    states === null ? null : Array.isArray(states) && states.length > 0 ? states : (["active"] as MemoryState[]);
+  if (effectiveStates) {
+    params.push(effectiveStates);
+    query += ` AND state = ANY($${params.length}::text[])`;
+  }
+
   if (category) {
     params.push(category);
     query += ` AND category = $${params.length}`;
@@ -38,13 +53,39 @@ export async function listMemories(
     params.push(sessionId);
     query += ` AND session_id = $${params.length}`;
   }
-  if (search) {
-    params.push(`%${search}%`, `%${search}%`);
-    query += ` AND (title ILIKE $${params.length - 1} OR content ILIKE $${params.length})`;
-  }
   if (tag) {
     params.push(tag);
     query += ` AND tags ? $${params.length}`;
+  }
+  if (search) {
+    // Hybrid retrieval:
+    // - FTS (GIN) for relevance
+    // - ILIKE fallback for odd tokens (paths, ids) that FTS may miss
+    const tsq = search;
+    const ilike = `%${search}%`;
+    params.push(tsq);
+    const tsIdx = params.length;
+    params.push(ilike);
+    const likeIdx = params.length;
+
+    const vecExpr = "to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, ''))";
+    const tsqExpr = `websearch_to_tsquery('simple', $${tsIdx})`;
+
+    query += ` AND (${vecExpr} @@ ${tsqExpr} OR title ILIKE $${likeIdx} OR content ILIKE $${likeIdx})`;
+
+    // Rank primarily by FTS relevance; add small recency+confidence tiebreakers.
+    // NOTE: Keep formula stable; avoid huge weights that cause surprising ordering.
+    const scoreExpr = `(
+      ts_rank_cd(${vecExpr}, ${tsqExpr}) * 10.0
+      + (1.0 / (1.0 + (EXTRACT(EPOCH FROM (now() - updated_at)) / 86400.0)))
+      + (confidence * 0.25)
+    )`;
+
+    params.push(limit);
+    query += ` ORDER BY ${scoreExpr} DESC, updated_at DESC LIMIT $${params.length}`;
+
+    const { rows } = await db.query(query, params);
+    return rows;
   }
 
   params.push(limit);
@@ -177,3 +218,49 @@ export async function deleteMemory(db: Client, tenantType: TenantType, tenantId:
   await db.query("DELETE FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [id, tenantType, tenantId]);
 }
 
+export async function setMemoryLifecycle(
+  db: Client,
+  input: {
+    tenantType: TenantType;
+    tenantId: string;
+    actorId: string | null;
+    id: string;
+    state?: MemoryState | null;
+    quality?: MemoryQuality | null;
+    nowIso: string;
+  }
+): Promise<{ id: string; state: string; quality: string; updated_at: string } | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  if (input.state) {
+    params.push(input.state);
+    sets.push(`state = $${params.length}`);
+  }
+  if (input.quality) {
+    params.push(input.quality);
+    sets.push(`quality = $${params.length}`);
+  }
+
+  if (sets.length === 0) return null;
+
+  params.push(input.nowIso);
+  sets.push(`updated_at = $${params.length}`);
+
+  params.push(input.actorId);
+  sets.push(`updated_by = $${params.length}`);
+
+  params.push(input.id, input.tenantType, input.tenantId);
+
+  const { rows } = await db.query(
+    `UPDATE memories
+     SET ${sets.join(", ")}
+     WHERE id = $${params.length - 2} AND tenant_type = $${params.length - 1} AND tenant_id = $${params.length}
+     RETURNING id, state, quality, updated_at`,
+    params
+  );
+
+  const row = rows[0] as any;
+  if (!row) return null;
+  return { id: String(row.id), state: String(row.state), quality: String(row.quality), updated_at: String(row.updated_at) };
+}

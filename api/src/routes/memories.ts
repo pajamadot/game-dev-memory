@@ -2,9 +2,32 @@ import { Hono } from "hono";
 import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
-import { createMemory, deleteMemory, getMemory, listMemories, updateMemory } from "../core/memories";
+import { createMemory, deleteMemory, getMemory, listMemories, setMemoryLifecycle, updateMemory, type MemoryQuality, type MemoryState } from "../core/memories";
 
 export const memoriesRouter = new Hono<AppEnv>();
+
+function truthy(v: unknown): boolean {
+  if (!v) return false;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  return s === "1" || s === "true" || s === "yes" || s === "on";
+}
+
+function isMemoryState(v: unknown): v is MemoryState {
+  return v === "active" || v === "superseded" || v === "quarantined";
+}
+
+function isMemoryQuality(v: unknown): v is MemoryQuality {
+  return v === "unknown" || v === "good" || v === "bad";
+}
+
+function safeRelation(v: unknown): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!s) return "related";
+  // Keep relation strings small + predictable for future analytics.
+  return s.slice(0, 64).replace(/[^a-zA-Z0-9._:-]/g, "_");
+}
 
 // List memories with optional filters
 memoriesRouter.get("/", async (c) => {
@@ -14,10 +37,19 @@ memoriesRouter.get("/", async (c) => {
   const search = c.req.query("q") || null;
   const tag = c.req.query("tag") || null;
   const sessionId = c.req.query("session_id") || null;
+  const includeInactive = truthy(c.req.query("include_inactive") || c.req.query("all_states"));
+  const stateParam = c.req.query("state") || null;
   const limit = parseInt(c.req.query("limit") || "50");
 
+  let states: MemoryState[] | null | undefined = undefined;
+  if (includeInactive) {
+    states = null; // no state filter
+  } else if (stateParam) {
+    states = isMemoryState(stateParam) ? [stateParam] : ["active"];
+  }
+
   const memories = await withDbClient(c.env, async (db) =>
-    await listMemories(db, tenantType, tenantId, { projectId, category, search, tag, sessionId, limit })
+    await listMemories(db, tenantType, tenantId, { projectId, category, search, tag, sessionId, states, limit })
   );
 
   return c.json({ memories, meta: { total: memories.length } });
@@ -98,4 +130,116 @@ memoriesRouter.delete("/:id", async (c) => {
     await deleteMemory(db, tenantType, tenantId, id);
   });
   return c.json({ deleted: true });
+});
+
+// Update memory lifecycle fields (state/quality).
+memoriesRouter.post("/:id/lifecycle", async (c) => {
+  const { tenantType, tenantId, actorId } = requireTenant(c);
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+  const now = new Date().toISOString();
+
+  const state = body.state;
+  const quality = body.quality;
+
+  const nextState = state === undefined || state === null ? null : isMemoryState(state) ? (state as MemoryState) : null;
+  const nextQuality =
+    quality === undefined || quality === null ? null : isMemoryQuality(quality) ? (quality as MemoryQuality) : null;
+
+  if (state !== undefined && state !== null && !nextState) {
+    return c.json({ ok: false, error: "Invalid state (expected active|superseded|quarantined)" }, 400);
+  }
+  if (quality !== undefined && quality !== null && !nextQuality) {
+    return c.json({ ok: false, error: "Invalid quality (expected unknown|good|bad)" }, 400);
+  }
+
+  const updated = await withDbClient(c.env, async (db) => {
+    return await setMemoryLifecycle(db, { tenantType, tenantId, actorId, id, state: nextState, quality: nextQuality, nowIso: now });
+  });
+
+  if (!updated) return c.json({ ok: false, error: "Memory not found (or no changes applied)" }, 404);
+  return c.json({ ok: true, ...updated });
+});
+
+// Link memory -> memory (entity_links). Useful for "supersedes", "contradicts", "supports", etc.
+memoriesRouter.post("/:id/link", async (c) => {
+  const { tenantType, tenantId, actorId } = requireTenant(c);
+  const fromId = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+
+  const toId = typeof body.to_memory_id === "string" && body.to_memory_id.trim() ? body.to_memory_id.trim() : null;
+  if (!toId) return c.json({ ok: false, error: "to_memory_id is required" }, 400);
+  if (toId === fromId) return c.json({ ok: false, error: "Cannot link a memory to itself" }, 400);
+
+  const relation = safeRelation(body.relation);
+  const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+  const now = new Date().toISOString();
+
+  await withDbClient(c.env, async (db) => {
+    const m1Res = await db.query("SELECT id, project_id FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+      fromId,
+      tenantType,
+      tenantId,
+    ]);
+    const m1 = m1Res.rows[0] ?? null;
+    if (!m1) throw new Error("Memory not found (from_id).");
+
+    const m2Res = await db.query("SELECT id, project_id FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+      toId,
+      tenantType,
+      tenantId,
+    ]);
+    const m2 = m2Res.rows[0] ?? null;
+    if (!m2) throw new Error("Memory not found (to_memory_id).");
+
+    if (String(m1.project_id) !== String(m2.project_id)) throw new Error("Memories must be in the same project.");
+
+    await db.query(
+      `INSERT INTO entity_links (
+         id, tenant_type, tenant_id,
+         from_type, from_id, to_type, to_id,
+         relation, metadata, created_at, created_by
+       )
+       VALUES ($1, $2, $3, 'memory', $4::uuid, 'memory', $5::uuid, $6, $7::jsonb, $8, $9)`,
+      [crypto.randomUUID(), tenantType, tenantId, fromId, toId, relation, JSON.stringify(metadata), now, actorId]
+    );
+
+    // If this is a "supersedes" relationship, mark the target memory as superseded (soft lifecycle).
+    if (relation === "supersedes") {
+      await db.query(
+        "UPDATE memories SET state = 'superseded', updated_at = $1, updated_by = $2 WHERE id = $3 AND tenant_type = $4 AND tenant_id = $5",
+        [now, actorId, toId, tenantType, tenantId]
+      );
+    }
+  });
+
+  return c.json({ ok: true, from_memory_id: fromId, to_memory_id: toId, relation, created_at: now });
+});
+
+// List inbound/outbound memory links for UI/debugging.
+memoriesRouter.get("/:id/links", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const id = c.req.param("id");
+
+  const { inbound, outbound } = await withDbClient(c.env, async (db) => {
+    const [outRes, inRes] = await Promise.all([
+      db.query(
+        `SELECT id, from_type, from_id, to_type, to_id, relation, metadata, created_at, created_by
+         FROM entity_links
+         WHERE tenant_type = $1 AND tenant_id = $2 AND from_type = 'memory' AND from_id = $3::uuid
+         ORDER BY created_at DESC`,
+        [tenantType, tenantId, id]
+      ),
+      db.query(
+        `SELECT id, from_type, from_id, to_type, to_id, relation, metadata, created_at, created_by
+         FROM entity_links
+         WHERE tenant_type = $1 AND tenant_id = $2 AND to_type = 'memory' AND to_id = $3::uuid
+         ORDER BY created_at DESC`,
+        [tenantType, tenantId, id]
+      ),
+    ]);
+    return { outbound: outRes.rows, inbound: inRes.rows };
+  });
+
+  return c.json({ inbound, outbound });
 });

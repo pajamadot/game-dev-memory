@@ -146,7 +146,7 @@ sessionsRouter.post("/:id/close", async (c) => {
       const project = projRes.rows[0] ?? { id: session.project_id, name: "Unknown Project", engine: "custom" };
 
       const memRes = await db.query(
-        "SELECT category, title, tags, updated_at FROM memories WHERE tenant_type = $1 AND tenant_id = $2 AND session_id = $3 ORDER BY updated_at DESC LIMIT 200",
+        "SELECT category, title, tags, updated_at FROM memories WHERE tenant_type = $1 AND tenant_id = $2 AND session_id = $3 AND state = 'active' ORDER BY updated_at DESC LIMIT 200",
         [tenantType, tenantId, id]
       );
 
