@@ -22,8 +22,8 @@
     "x64"
   ],
   "files": [
-    "bin",
-    "scripts",
+    "bin/pajama.js",
+    "scripts/postinstall.js",
     "README.md"
   ],
   "engines": {
