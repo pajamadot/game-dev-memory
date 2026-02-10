@@ -11,6 +11,13 @@ Research agent memory patterns using the internet and publish an updated report 
 
 ### 1) Gather sources (use web.run)
 
+- Optionally generate a local arXiv candidate list + per-paper note stubs:
+  - `node skills/agent-memory-research/scripts/fetch_arxiv.js`
+  - Output goes to `research/agent-memory/` (digest + `papers/` notes).
+  - This is for "study mode": curate + add notes before promoting findings into the published report.
+  - To generate note stubs for a pinned set of canonical papers:
+    - `node skills/agent-memory-research/scripts/fetch_arxiv.js --id-list "2310.08560,2304.03442,2309.02427,2404.13501,2409.07429,2410.10813,2402.17753,2505.16067,2512.12818"`
+
 - Prefer primary sources first (papers, official docs).
 - Pull 6-12 sources covering both research + implementation docs.
 - Keep notes short and citation-oriented (you will link them in the report).
@@ -31,6 +38,10 @@ If you need a starting list of canonical sources, open `skills/agent-memory-rese
 Edit the markdown report:
 
 - `web/src/content/research/agent-memory.md`
+
+Keep raw/working notes (annotated paper summaries, partial ideas) in:
+
+- `research/agent-memory/`
 
 Keep the report structure stable so it stays scannable:
 

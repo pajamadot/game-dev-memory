@@ -15,6 +15,8 @@ It also calls out a "gateway + control UI" pattern inspired by Cloudflare's `mol
 3. Retrieval should be **evidence-first**: return items with source pointers (artifact chunks, logs, traces) and keep the LLM as the synthesis layer.
 4. Make memory management explicit: **summarize, compress, and page** context (MemGPT-style) rather than blindly stuffing more into the prompt.
 5. Keep changes auditable: every evolution step should emit an **event** describing what changed and why.
+6. Treat memory *updates* (edit/merge/delete/forget) as a feature, not an afterthought. This strongly affects agent performance in practice.
+7. Use benchmarks (LongMemEval; LoCoMo) to drive schema and retrieval design, not just model choice.
 
 ## Memory Taxonomy (What To Store)
 
@@ -39,6 +41,8 @@ It also calls out a "gateway + control UI" pattern inspired by Cloudflare's `mol
 - Reusable procedures: "How to capture an Unreal Insights trace", "How to reproduce crash categories", "How to upload artifacts", "Release checklist".
 - Agent tool-use papers (ReAct; Voyager) motivate separating "how to do things" from raw facts.  
   Sources: ReAct (Yao et al., 2022/2023); Voyager (Wang et al., 2023).
+- Workflow-memory work (CoALA; AWM) suggests representing procedures as reusable *plans* (tool chains + constraints), not just text instructions.
+  Sources: CoALA (Sumers et al., 2023); Agent Workflow Memory (Wang et al., 2024).
 
 ### 5) Artifact memory (large files)
 
@@ -120,6 +124,27 @@ Reflexion formalizes a loop of: act -> observe -> reflect -> improve behavior. F
 
 Source: Reflexion (Shinn et al., 2023).
 
+### Memory update policies (write / merge / forget)
+
+If you store "everything", you will eventually retrieve noisy or outdated items.
+
+Practical implications:
+
+- explicitly track **confidence** and **recency**
+- allow "superseded by" links (new knowledge replaces old)
+- treat deletion/forgetting as a first-class operation with an audit trail (who/what/why)
+
+Recent empirical work shows that memory management choices materially impact LLM agent performance on tasks and benchmarks.  
+Source: "How Memory Management Impacts LLM Agent Performance" (Bond et al., 2025).
+
+## Benchmarks (Use These To Drive Design)
+
+- LongMemEval: benchmark for long-term memory behaviors in LLMs.
+  - It’s useful for evaluating retrieval + update policies, not just raw context length.
+- LoCoMo: benchmark for long-term conversation memory.
+
+Sources: LongMemEval (Gao et al., 2024); LoCoMo (Wang et al., 2024).
+
 ## A Moltworker-Inspired Agent Pattern (Gateway + Control UI)
 
 Cloudflare's `moltworker` packages an agent runtime behind a "gateway" and exposes a web-based control UI. The parts worth copying for a project-memory product are:
@@ -163,14 +188,21 @@ The most important missing piece for "semantic search" is an embeddings index. M
 4. Expand the `/agent` control UI with evidence deep links (memory + asset viewers).
 5. Add an artifact/asset viewer UI for chunked large files (range fetch + chunk text preview).
 6. Grow the evolver beyond summaries: dedupe, confidence calibration, and cross-project bridges within a tenant (org or personal).
+7. Add explicit "supersedes" / "contradicts" linking and a lightweight memory pruning job (policy + audit).
 
 ## References
 
 - Park, J. S. et al. "Generative Agents: Interactive Simulacra of Human Behavior" (2023). arXiv:2304.03442. https://arxiv.org/abs/2304.03442
 - Packer, C. et al. "MemGPT: Towards LLMs as Operating Systems" (2023). arXiv:2310.08560. https://arxiv.org/abs/2310.08560
+- Sumers, T. R. et al. "Cognitive Architectures for Language Agents (CoALA)" (2023). arXiv:2309.02427. https://arxiv.org/abs/2309.02427
 - Shinn, N. et al. "Reflexion: Language Agents with Verbal Reinforcement Learning" (2023). arXiv:2303.11366. https://arxiv.org/abs/2303.11366
 - Yao, S. et al. "ReAct: Synergizing Reasoning and Acting in Language Models" (2022). arXiv:2210.03629. https://arxiv.org/abs/2210.03629
 - Wang, G. et al. "Voyager: An Open-Ended Embodied Agent with Large Language Models" (2023). arXiv:2305.16291. https://arxiv.org/abs/2305.16291
+- Yao, H. et al. "A Survey on the Memory Mechanism of Large Language Model based Agents" (2024). arXiv:2404.13501. https://arxiv.org/abs/2404.13501
+- Wang, Z. Z. et al. "Agent Workflow Memory (AWM)" (2024). arXiv:2409.07429. https://arxiv.org/abs/2409.07429
+- Gao, J. et al. "LongMemEval: Benchmarking LLMs for Long-Term Memory" (2024). arXiv:2410.10813. https://arxiv.org/abs/2410.10813
+- Wang, X. et al. "LoCoMo: Evaluating LLMs on Long-Term Conversation Memory" (2024). arXiv:2402.17753. https://arxiv.org/abs/2402.17753
+- Bond, H. et al. "How Memory Management Impacts LLM Agent Performance" (2025). arXiv:2505.16067. https://arxiv.org/abs/2505.16067
 - Cloudflare `moltworker` (OpenClaw on Workers): https://github.com/cloudflare/moltworker
 - LangGraph docs: Memory. https://langchain-ai.github.io/langgraph/concepts/memory/
 - LlamaIndex docs: Agent Memory. https://docs.llamaindex.ai/en/stable/understanding/agent/memory/
