@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
-import { askProjectMemoryAgent, type AskAgentState } from "./actions";
+import { askProjectMemoryAgent, saveAgentAnswerAsMemory, type AskAgentState, type SaveAgentState } from "./actions";
 
 type ProjectRow = {
   id: string;
@@ -34,9 +34,31 @@ function bytes(n: number): string {
 
 export function AgentClient(props: { projects: ProjectRow[] }) {
   const [state, formAction] = useActionState<AskAgentState | null, FormData>(askProjectMemoryAgent, null);
+  const [saveState, saveAction] = useActionState<SaveAgentState | null, FormData>(saveAgentAnswerAsMemory, null);
 
   const ok = state && (state as any).ok === true;
   const err = state && (state as any).ok === false ? (state as any).error : null;
+
+  const hasAnswer = Boolean(ok && (state as any).answer);
+  const retrievedMemoryIds: string[] = ok ? ((state as any).retrieved.memories || []).map((m: any) => String(m.id)) : [];
+  const retrievedAssetIds: string[] = (() => {
+    if (!ok) return [];
+    const idx = ((state as any).retrieved.assets_index || {}) as Record<string, any[]>;
+    const out: string[] = [];
+    for (const assets of Object.values(idx)) {
+      for (const a of assets || []) {
+        const id = String((a as any).id || "");
+        if (!id) continue;
+        if (out.includes(id)) continue;
+        out.push(id);
+        if (out.length >= 200) return out;
+      }
+    }
+    return out;
+  })();
+
+  const saveOk = saveState && (saveState as any).ok === true;
+  const saveErr = saveState && (saveState as any).ok === false ? (saveState as any).error : null;
 
   return (
     <div className="space-y-6">
@@ -139,6 +161,113 @@ export function AgentClient(props: { projects: ProjectRow[] }) {
               </p>
             </section>
           )}
+
+          {hasAnswer ? (
+            <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+              <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Save As Memory</h2>
+              <p className="mt-1 text-xs leading-5 text-zinc-600">
+                Turn this answer into durable project memory so it can be retrieved later (and shared with your org).
+              </p>
+
+              <form action={saveAction} className="mt-5 grid grid-cols-1 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+                  <div className="sm:col-span-3">
+                    <label className="text-xs font-medium text-zinc-700" htmlFor="save-project">
+                      Project (required)
+                    </label>
+                    <select
+                      id="save-project"
+                      name="project_id"
+                      required
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none ring-zinc-900/10 focus:ring-4"
+                      defaultValue={(state as any).project_id || ""}
+                    >
+                      <option value="">Select a project</option>
+                      {props.projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.engine})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-medium text-zinc-700" htmlFor="save-category">
+                      Category
+                    </label>
+                    <select
+                      id="save-category"
+                      name="category"
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none ring-zinc-900/10 focus:ring-4"
+                      defaultValue="summary"
+                    >
+                      <option value="note">note</option>
+                      <option value="bug">bug</option>
+                      <option value="decision">decision</option>
+                      <option value="pattern">pattern</option>
+                      <option value="architecture">architecture</option>
+                      <option value="asset">asset</option>
+                      <option value="lesson">lesson</option>
+                      <option value="summary">summary</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+                  <div className="sm:col-span-3">
+                    <label className="text-xs font-medium text-zinc-700" htmlFor="save-title">
+                      Title
+                    </label>
+                    <input
+                      id="save-title"
+                      name="title"
+                      required
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none ring-zinc-900/10 focus:ring-4"
+                      defaultValue={`Agent: ${String((state as any).query || "").slice(0, 120)}`}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-medium text-zinc-700" htmlFor="save-tags">
+                      Tags
+                    </label>
+                    <input
+                      id="save-tags"
+                      name="tags"
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 text-sm outline-none ring-zinc-900/10 focus:ring-4"
+                      defaultValue="agent"
+                    />
+                  </div>
+                </div>
+
+                <input type="hidden" name="query" value={String((state as any).query || "")} />
+                <input type="hidden" name="answer" value={String((state as any).answer || "")} />
+                <input type="hidden" name="retrieved_memories_json" value={JSON.stringify(retrievedMemoryIds)} />
+                <input type="hidden" name="retrieved_assets_json" value={JSON.stringify(retrievedAssetIds)} />
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button className="inline-flex h-10 items-center justify-center rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white hover:bg-zinc-800">
+                    Save memory
+                  </button>
+                  {saveOk ? (
+                    <Link
+                      href={`/memories/${(saveState as any).memory_id}`}
+                      className="text-xs font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
+                    >
+                      Saved: view memory
+                    </Link>
+                  ) : null}
+                </div>
+
+                {saveErr ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p className="font-semibold">Save error</p>
+                    <p className="mt-1 break-words font-mono text-xs leading-5">{saveErr}</p>
+                  </div>
+                ) : null}
+              </form>
+            </section>
+          ) : null}
 
           <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
             <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Retrieved Evidence</h2>
