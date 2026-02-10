@@ -189,9 +189,23 @@ artifactsRouter.get("/", async (c) => {
 artifactsRouter.get("/:id", async (c) => {
   const { tenantType, tenantId } = requireTenant(c);
   const id = c.req.param("id");
+  const includeMetadata = (() => {
+    const v = (c.req.query("include_metadata") || c.req.query("metadata") || "").trim().toLowerCase();
+    return v === "1" || v === "true" || v === "yes" || v === "on";
+  })();
 
   const artifact = await withDbClient(c.env, async (db) => {
-    const { rows } = await db.query("SELECT * FROM artifacts WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
+    const select = includeMetadata
+      ? "SELECT *"
+      : `SELECT
+           id, tenant_type, tenant_id, project_id, session_id,
+           type, storage_mode, r2_bucket, r2_key, r2_prefix,
+           content_type, byte_size, sha256,
+           COALESCE(metadata, '{}'::jsonb) - 'pageindex' AS metadata,
+           COALESCE(metadata, '{}'::jsonb) ? 'pageindex' AS has_pageindex,
+           created_at, created_by`;
+
+    const { rows } = await db.query(`${select} FROM artifacts WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3`, [
       id,
       tenantType,
       tenantId,

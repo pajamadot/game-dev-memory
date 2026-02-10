@@ -132,7 +132,8 @@ export default async function ArtifactNodePage(props: {
   let artifact: ArtifactRow | null = null;
   let artifactError: string | null = null;
   try {
-    artifact = await apiJson<ArtifactRow>(`/api/artifacts/${encodeURIComponent(id)}`);
+    // Avoid downloading large pageindex metadata when rendering a single node view.
+    artifact = await apiJson<ArtifactRow>(`/api/artifacts/${encodeURIComponent(id)}?include_metadata=0`);
   } catch (e) {
     artifactError = e instanceof Error ? e.message : String(e);
   }
@@ -315,4 +316,3 @@ export default async function ArtifactNodePage(props: {
     </div>
   );
 }
-
