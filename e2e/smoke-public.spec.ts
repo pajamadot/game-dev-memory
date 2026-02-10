@@ -43,7 +43,7 @@ test.describe("Public UX smoke", () => {
 
   test("agent pro pages (logged out) render", async ({ page }) => {
     await page.goto("/agent/pro");
-    await expect(page.getByRole("heading", { name: /Project Memory Pro Agent/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Game Dev Agent/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
 
     await page.goto("/agent/pro/sessions");

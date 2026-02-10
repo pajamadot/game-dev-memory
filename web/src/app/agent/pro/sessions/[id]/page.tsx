@@ -38,9 +38,9 @@ export default async function ProAgentSessionPage(props: { params: Promise<{ id:
       <div className="min-h-screen bg-[radial-gradient(900px_circle_at_10%_-20%,#bfdbfe_0%,transparent_55%),radial-gradient(900px_circle_at_90%_0%,#fde68a_0%,transparent_55%),linear-gradient(180deg,#fafafa_0%,#ffffff_60%,#fafafa_100%)]">
         <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col justify-center px-6 py-16">
           <div className="rounded-3xl border border-zinc-200/70 bg-white/70 p-10 shadow-sm backdrop-blur">
-            <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">AGENT PRO</p>
+            <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">AGENT</p>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950">Sign in required</h1>
-            <p className="mt-2 text-sm leading-6 text-zinc-600">Sign in to continue a pro agent session.</p>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">Sign in to continue a streaming session.</p>
             <div className="mt-6 flex items-center gap-3">
               <SignInButton mode="modal">
                 <button className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white hover:bg-zinc-800">
@@ -78,4 +78,3 @@ export default async function ProAgentSessionPage(props: { params: Promise<{ id:
     </div>
   );
 }
-

@@ -154,7 +154,7 @@ export function ProAgentChatClient(props: {
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new Error(`Pro agent failed (${res.status}): ${text || res.statusText}`);
+        throw new Error(`Agent failed (${res.status}): ${text || res.statusText}`);
       }
 
       await readSseStream(res, (ev) => {
@@ -174,8 +174,8 @@ export function ProAgentChatClient(props: {
     <div className="space-y-6">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
-          <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">AGENT PRO</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{props.title || "Pro Agent Session"}</h1>
+          <p className="text-xs font-semibold tracking-[0.22em] text-zinc-500">AGENT</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{props.title || "Agent Session"}</h1>
           <p className="mt-1 text-sm text-zinc-600">
             {props.project ? (
               <>
@@ -326,4 +326,3 @@ export function ProAgentChatClient(props: {
     </div>
   );
 }
-

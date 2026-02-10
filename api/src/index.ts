@@ -43,12 +43,51 @@ app.onError((err, c) => {
 });
 
 app.get("/", (c) => {
-  return c.json({
-    name: "game-dev-memory-api",
-    version: "0.1.0",
-    status: "ok",
-  });
+  const hostHeader = (c.req.header("host") || "").toLowerCase();
+  const host = hostHeader.split(":")[0];
+  const accept = (c.req.header("accept") || "").toLowerCase();
+  const wantsHtml = accept.includes("text/html");
+  const origin = new URL(c.req.url).origin;
+
+  if (host === "game-dev-agent.pajamadot.com") {
+    // Professional UX for the agent hostname: browsers should land on the UI,
+    // while non-browser clients get structured endpoint metadata.
+    if (wantsHtml) return c.redirect(`${c.env.WEBSITE_URL}/agent/pro`, 302);
+
+    return c.json({
+      name: "game-dev-agent",
+      status: "ok",
+      ui: `${c.env.WEBSITE_URL}/agent/pro`,
+      endpoints: {
+        pro_sessions: `${origin}/api/agent-pro/sessions`,
+        pro_session_messages: `${origin}/api/agent-pro/sessions/:id/messages`,
+        pro_continue: `${origin}/api/agent-pro/sessions/:id/continue`,
+        standard_agent_ask: `${origin}/api/agent/ask`,
+        memories: `${origin}/api/memories`,
+        assets: `${origin}/api/assets`,
+        oauth_discovery: `${origin}/.well-known/oauth-authorization-server`,
+        mcp_jsonrpc: `${origin}/mcp`,
+      },
+      auth: {
+        web: "Clerk session JWT",
+        api: "API key (Bearer)",
+      },
+      related_hosts: {
+        web: c.env.WEBSITE_URL,
+        api: "https://api-game-dev-memory.pajamadot.com",
+        mcp: "https://mcp-game-dev-memory.pajamadot.com",
+      },
+    });
+  }
+
+  if (host === "mcp-game-dev-memory.pajamadot.com" && wantsHtml) {
+    return c.redirect(`${c.env.WEBSITE_URL}/docs`, 302);
+  }
+
+  return c.json({ name: "game-dev-memory-api", version: "0.1.0", status: "ok" });
 });
+
+app.get("/health", (c) => c.json({ status: "ok" }));
 
 // OAuth discovery endpoints for MCP clients.
 app.get("/.well-known/oauth-authorization-server", (c) => c.json(getOAuthMetadata(c.req.raw, c.env)));
