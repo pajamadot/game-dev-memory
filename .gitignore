@@ -49,3 +49,7 @@ skills/memory-evolver/.data/
 skills/memory-evolver/*.log
 
 .vercel
+
+# Local npm postinstall downloads (do not commit)
+packages/pajama/bin/pajama
+packages/pajama/bin/pajama.exe

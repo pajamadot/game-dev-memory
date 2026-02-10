@@ -5,9 +5,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$IsWin = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+$IsMac = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX)
+$IsLin = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux)
+
 function Get-CrateVersion([string]$CargoTomlPath) {
   $text = Get-Content -Path $CargoTomlPath -Raw
-  if ($text -match '(?m)^version\\s*=\\s*\"([^\"]+)\"\\s*$') {
+  if ($text -match '(?m)^version\s*=\s*"([^"]+)"\s*$') {
     return $Matches[1]
   }
   throw "Could not parse version from $CargoTomlPath"
@@ -15,8 +19,8 @@ function Get-CrateVersion([string]$CargoTomlPath) {
 
 function Get-PlatformTriplet() {
   $plat =
-    if ($IsWindows) { "win32" }
-    elseif ($IsMacOS) { "darwin" }
+    if ($IsWin) { "win32" }
+    elseif ($IsMac) { "darwin" }
     else { "linux" }
 
   $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLower()
@@ -38,7 +42,7 @@ $platform = $triplet.platform
 $arch = $triplet.arch
 
 $srcExe =
-  if ($IsWindows) { Join-Path $crateDir "target\\release\\pajama.exe" }
+  if ($IsWin) { Join-Path $crateDir "target\\release\\pajama.exe" }
   else { Join-Path $crateDir "target/release/pajama" }
 
 $fileName =
@@ -72,4 +76,3 @@ Write-Host "[release] Download URL:"
 Write-Host ("{0}/{1}/{2}" -f $BaseUrl, $tag, $fileName)
 Write-Host "[release] SHA256:"
 Write-Host $sha
-
