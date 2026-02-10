@@ -85,6 +85,12 @@ export default async function AgentPage() {
               Back to console
             </Link>
             <Link
+              href="/assets"
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Files
+            </Link>
+            <Link
               href="/settings/tokens"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >

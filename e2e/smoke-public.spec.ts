@@ -35,6 +35,12 @@ test.describe("Public UX smoke", () => {
     await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
   });
 
+  test("assets browser (logged out) renders", async ({ page }) => {
+    await page.goto("/assets");
+    await expect(page.getByRole("heading", { name: /Sign in required/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
+  });
+
   test("memory + asset viewers (logged out) render", async ({ page }) => {
     const fake = "00000000-0000-0000-0000-000000000000";
 

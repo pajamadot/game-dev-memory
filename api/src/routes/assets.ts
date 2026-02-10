@@ -64,6 +64,12 @@ function contentDispositionAttachment(filename: string): string {
   return `attachment; filename="${safe}"`;
 }
 
+function truthyQuery(v: string | null | undefined): boolean {
+  if (!v) return false;
+  const s = v.trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes" || s === "on";
+}
+
 export const assetsRouter = new Hono<AppEnv>();
 
 // List assets with optional filters
@@ -73,6 +79,7 @@ assetsRouter.get("/", async (c) => {
   const memoryId = c.req.query("memory_id");
   const status = c.req.query("status");
   const limit = clampInt(c.req.query("limit"), 50, 1, 200);
+  const includeMemoryLinks = truthyQuery(c.req.query("include_memory_links") || c.req.query("include_links"));
 
   const assets = await withDbClient(c.env, async (db) => {
     const params: unknown[] = [tenantType, tenantId];
@@ -103,7 +110,55 @@ assetsRouter.get("/", async (c) => {
     params.push(limit);
     q += ` ORDER BY a.created_at DESC LIMIT $${params.length}`;
 
-    const { rows } = await db.query(q, params);
+    if (!includeMemoryLinks) {
+      const { rows } = await db.query(q, params);
+      return rows;
+    }
+
+    // Return asset metadata plus linked memory summaries (evidence graph).
+    //
+    // We keep the base selection + paging deterministic, then join link aggregates.
+    const full = `
+      WITH base AS (
+        ${q}
+      )
+      SELECT
+        base.*,
+        COALESCE(links.linked_memory_count, 0) AS linked_memory_count,
+        COALESCE(links.linked_memories, '[]'::jsonb) AS linked_memories
+      FROM base
+      LEFT JOIN (
+        SELECT
+          l.to_id AS asset_id,
+          COUNT(DISTINCT m.id) AS linked_memory_count,
+          COALESCE(
+            jsonb_agg(
+              jsonb_build_object(
+                'id', m.id,
+                'project_id', m.project_id,
+                'category', m.category,
+                'title', m.title,
+                'updated_at', m.updated_at
+              )
+              ORDER BY m.updated_at DESC
+            ),
+            '[]'::jsonb
+          ) AS linked_memories
+        FROM entity_links l
+        JOIN memories m
+          ON m.tenant_type = l.tenant_type
+         AND m.tenant_id = l.tenant_id
+         AND m.id = l.from_id
+        WHERE l.tenant_type = $1 AND l.tenant_id = $2
+          AND l.from_type = 'memory'
+          AND l.to_type = 'asset'
+        GROUP BY l.to_id
+      ) links
+        ON links.asset_id = base.id
+      ORDER BY base.created_at DESC
+    `;
+
+    const { rows } = await db.query(full, params);
     return rows;
   });
 
@@ -121,7 +176,35 @@ assetsRouter.get("/:id", async (c) => {
       tenantType,
       tenantId,
     ]);
-    return rows[0] ?? null;
+    const row = rows[0] ?? null;
+    if (!row) return null;
+
+    const countRes = await db.query(
+      `SELECT COUNT(DISTINCT l.from_id) AS cnt
+       FROM entity_links l
+       WHERE l.tenant_type = $1 AND l.tenant_id = $2
+         AND l.to_type = 'asset' AND l.to_id = $3::uuid
+         AND l.from_type = 'memory'`,
+      [tenantType, tenantId, id]
+    );
+    const linkedCount = countRes.rows[0]?.cnt ? Number(countRes.rows[0].cnt) : 0;
+
+    const linkedRes = await db.query(
+      `SELECT m.id, m.project_id, m.category, m.title, m.updated_at
+       FROM entity_links l
+       JOIN memories m
+         ON m.tenant_type = l.tenant_type
+        AND m.tenant_id = l.tenant_id
+        AND m.id = l.from_id
+       WHERE l.tenant_type = $1 AND l.tenant_id = $2
+         AND l.to_type = 'asset' AND l.to_id = $3::uuid
+         AND l.from_type = 'memory'
+       ORDER BY m.updated_at DESC
+       LIMIT 100`,
+      [tenantType, tenantId, id]
+    );
+
+    return { ...row, linked_memory_count: linkedCount, linked_memories: linkedRes.rows || [] };
   });
 
   if (!asset) return c.json({ error: "Asset not found" }, 404);
@@ -591,4 +674,3 @@ assetsRouter.delete("/:id", async (c) => {
 
   return c.json({ ok: true, deleted: true, asset_id: id });
 });
-

@@ -5,6 +5,14 @@ import { apiJson } from "@/lib/memory-api";
 
 export const dynamic = "force-dynamic";
 
+type LinkedMemorySummary = {
+  id: string;
+  project_id: string;
+  category: string;
+  title: string;
+  updated_at: string;
+};
+
 type AssetRow = {
   id: string;
   project_id: string;
@@ -18,6 +26,8 @@ type AssetRow = {
   metadata: unknown;
   created_at: string;
   updated_at: string;
+  linked_memory_count?: number;
+  linked_memories?: LinkedMemorySummary[];
 };
 
 function fmt(ts: string | null | undefined): string {
@@ -112,6 +122,8 @@ export default async function AssetPage(props: { params: Promise<{ id: string }>
   }
 
   const name = asset.original_name || "asset";
+  const linked = Array.isArray(asset.linked_memories) ? asset.linked_memories : [];
+  const linkedCount = Number.isFinite(asset.linked_memory_count as any) ? Number(asset.linked_memory_count) : linked.length;
 
   return (
     <div className="min-h-screen bg-[radial-gradient(900px_circle_at_10%_-20%,#bfdbfe_0%,transparent_55%),radial-gradient(900px_circle_at_90%_0%,#fde68a_0%,transparent_55%),linear-gradient(180deg,#fafafa_0%,#ffffff_60%,#fafafa_100%)]">
@@ -130,6 +142,12 @@ export default async function AssetPage(props: { params: Promise<{ id: string }>
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
               Back to agent
+            </Link>
+            <Link
+              href="/assets"
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              Files
             </Link>
             <Link
               href="/"
@@ -165,6 +183,38 @@ export default async function AssetPage(props: { params: Promise<{ id: string }>
           </section>
 
           <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+            <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Attached Memories</h2>
+            <p className="mt-1 text-xs text-zinc-600">Memories this file is linked to (evidence graph).</p>
+
+            {linkedCount === 0 ? (
+              <p className="mt-4 text-sm text-zinc-600">No linked memories.</p>
+            ) : (
+              <ul className="mt-4 space-y-2">
+                {linked.slice(0, 50).map((m) => (
+                  <li key={m.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                      <Link
+                        href={`/memories/${m.id}`}
+                        className="text-sm font-semibold text-zinc-950 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
+                      >
+                        {m.title}
+                      </Link>
+                      <p className="text-[11px] text-zinc-500">
+                        {m.category} · updated {fmt(m.updated_at)}
+                      </p>
+                    </div>
+                    <p className="mt-2 break-words font-mono text-xs text-zinc-700">{m.id}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {linkedCount > linked.length ? (
+              <p className="mt-3 text-xs text-zinc-500">Showing {linked.length} of {linkedCount} linked memories.</p>
+            ) : null}
+          </section>
+
+          <section className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur">
             <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Download</h2>
             <p className="mt-2 text-sm text-zinc-600">
               Downloads require auth. Use the CLI or an API token to fetch <span className="font-mono">/api/assets/&lt;id&gt;/object</span>.
@@ -175,4 +225,3 @@ export default async function AssetPage(props: { params: Promise<{ id: string }>
     </div>
   );
 }
-
