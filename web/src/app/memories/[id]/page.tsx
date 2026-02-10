@@ -225,6 +225,7 @@ export default async function MemoryPage(props: { params: Promise<{ id: string }
               </form>
               <form action={setMemoryLifecycleAction}>
                 <input type="hidden" name="memory_id" value={memory.id} />
+                <input type="hidden" name="state" value="quarantined" />
                 <input type="hidden" name="quality" value="bad" />
                 <button className="inline-flex h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-900 hover:bg-zinc-50">
                   Mark bad

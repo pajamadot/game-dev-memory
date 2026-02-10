@@ -153,8 +153,16 @@ memoriesRouter.post("/:id/lifecycle", async (c) => {
     return c.json({ ok: false, error: "Invalid quality (expected unknown|good|bad)" }, 400);
   }
 
+  // Safety: quality=bad should not remain active by default; it tends to poison retrieval.
+  let finalState = nextState;
+  let finalQuality = nextQuality;
+  if (!finalState && finalQuality === "bad") finalState = "quarantined";
+  if (finalState === "active" && finalQuality === "bad") {
+    return c.json({ ok: false, error: "quality=bad requires state=quarantined (or omit state and it will auto-quarantine)" }, 400);
+  }
+
   const updated = await withDbClient(c.env, async (db) => {
-    return await setMemoryLifecycle(db, { tenantType, tenantId, actorId, id, state: nextState, quality: nextQuality, nowIso: now });
+    return await setMemoryLifecycle(db, { tenantType, tenantId, actorId, id, state: finalState, quality: finalQuality, nowIso: now });
   });
 
   if (!updated) return c.json({ ok: false, error: "Memory not found (or no changes applied)" }, 404);

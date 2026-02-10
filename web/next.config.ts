@@ -13,6 +13,13 @@ const nextConfig: NextConfig = {
     root: repoRoot,
   },
   outputFileTracingRoot: repoRoot,
+  experimental: {
+    // Next's memory-based worker count can spawn a very high number of workers
+    // on large machines (e.g. 60+), which has been unstable in local Windows builds.
+    // Cap the worker count to keep builds predictable.
+    memoryBasedWorkersCount: false,
+    cpus: 8,
+  },
 };
 
 export default nextConfig;

@@ -79,6 +79,7 @@ export async function listMemories(
       ts_rank_cd(${vecExpr}, ${tsqExpr}) * 10.0
       + (1.0 / (1.0 + (EXTRACT(EPOCH FROM (now() - updated_at)) / 86400.0)))
       + (confidence * 0.25)
+      + CASE quality WHEN 'good' THEN 0.2 WHEN 'bad' THEN -0.5 ELSE 0.0 END
     )`;
 
     params.push(limit);
