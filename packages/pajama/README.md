@@ -6,6 +6,8 @@ Install the `pajama` CLI via npm (recommended for end users):
 npm i -g @pajamadot/pajama
 ```
 
+This installs a small JS launcher and downloads the CLI binary automatically.
+
 Login (OAuth PKCE):
 
 ```bash
@@ -49,3 +51,11 @@ If you are on macOS or Linux, install from source for now:
 cd pajama
 cargo install --path . --force
 ```
+
+## Troubleshooting
+
+If the binary is missing after install:
+
+- Ensure npm scripts are enabled (`npm config get ignore-scripts` should be `false`)
+- Re-run install scripts: `npm rebuild -g @pajamadot/pajama`
+- Or just run `pajama --version` (the launcher will attempt an on-demand install)

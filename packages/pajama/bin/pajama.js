@@ -3,7 +3,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 
 function binaryName() {
   return process.platform === "win32" ? "pajama.exe" : "pajama";
@@ -13,14 +13,34 @@ function binaryPath() {
   return path.join(__dirname, binaryName());
 }
 
-const bin = binaryPath();
-if (!fs.existsSync(bin)) {
-  console.error("[pajama] CLI binary not found.");
-  console.error("[pajama] Try reinstalling: npm i -g @pajamadot/pajama");
-  console.error("[pajama] Or build from source: cargo install --path pajama --force");
-  process.exit(1);
+function ensureBinaryInstalled() {
+  const bin = binaryPath();
+  if (fs.existsSync(bin)) return bin;
+
+  // Fallback: if install scripts were disabled or postinstall failed, try to fetch
+  // the binary on first run.
+  const installer = path.join(__dirname, "..", "scripts", "postinstall.js");
+  try {
+    console.error("[pajama] CLI binary not found; attempting on-demand install...");
+    const res = spawnSync(process.execPath, [installer], { stdio: "inherit" });
+    if (res.status !== 0) {
+      throw new Error(`installer exited with code ${res.status}`);
+    }
+  } catch (err) {
+    console.error("[pajama] On-demand install failed.");
+    console.error("[pajama] Try reinstalling: npm i -g @pajamadot/pajama");
+    console.error("[pajama] Or build from source: cargo install --path pajama --force");
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(bin)) {
+    console.error("[pajama] Install finished but binary is still missing.");
+    process.exit(1);
+  }
+  return bin;
 }
 
+const bin = ensureBinaryInstalled();
 const child = spawn(bin, process.argv.slice(2), { stdio: "inherit" });
 child.on("exit", (code, signal) => {
   if (signal) {
@@ -29,4 +49,3 @@ child.on("exit", (code, signal) => {
   }
   process.exit(code == null ? 1 : code);
 });
-
