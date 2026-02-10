@@ -35,6 +35,12 @@ test.describe("Public UX smoke", () => {
     await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
   });
 
+  test("agent sessions (logged out) renders", async ({ page }) => {
+    await page.goto("/agent/sessions");
+    await expect(page.getByRole("heading", { name: /Sign in required/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
+  });
+
   test("assets browser (logged out) renders", async ({ page }) => {
     await page.goto("/assets");
     await expect(page.getByRole("heading", { name: /Sign in required/i })).toBeVisible();
