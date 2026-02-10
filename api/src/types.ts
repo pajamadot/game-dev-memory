@@ -5,6 +5,11 @@ export interface Env {
   // Fallback for local execution/testing without a Hyperdrive binding.
   DATABASE_URL?: string;
 
+  // Optional: enable the Project Memory Agent (RAG) with Anthropic.
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_MODEL?: string;
+  ANTHROPIC_VERSION?: string;
+
   // Clerk session JWT verification (JWKS).
   // Example: https://clerk.your-domain.com/.well-known/jwks.json
   CLERK_JWKS_URL?: string;

@@ -13,6 +13,7 @@ import { assetsRouter } from "./routes/assets";
 import { downloadsRouter } from "./routes/downloads";
 import { researchRouter } from "./routes/research";
 import { tokensRouter } from "./routes/tokens";
+import { agentRouter } from "./routes/agent";
 import { oauthRouter } from "./routes/oauth";
 import { TenantError } from "./tenant";
 import { runUnrealAgentsDailyDigestForAllTenants } from "./research/unrealAgents";
@@ -109,6 +110,7 @@ app.route("/api/artifacts", artifactsRouter);
 app.route("/api/assets", assetsRouter);
 app.route("/api/research", researchRouter);
 app.route("/api/tokens", tokensRouter);
+app.route("/api/agent", agentRouter);
 app.route("/api/oauth", oauthRouter);
 app.route("/downloads", downloadsRouter);
 
