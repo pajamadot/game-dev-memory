@@ -21,7 +21,14 @@
   // These must exist in the Cloudflare zone and be enabled for Workers.
   "routes": [
     { "pattern": "api.game-dev-memory.pajamadot.com", "custom_domain": true },
-    { "pattern": "mcp.game-dev-memory.pajamadot.com", "custom_domain": true }
+    { "pattern": "mcp.game-dev-memory.pajamadot.com", "custom_domain": true },
+
+    // NOTE: Cloudflare Universal SSL does not cover multi-level subdomains like
+    // `api.game-dev-memory.pajamadot.com` unless you provision additional certs
+    // (e.g. `*.game-dev-memory.pajamadot.com`). These single-level fallbacks
+    // are covered by `*.pajamadot.com` and typically enable HTTPS immediately.
+    { "pattern": "api-game-dev-memory.pajamadot.com", "custom_domain": true },
+    { "pattern": "mcp-game-dev-memory.pajamadot.com", "custom_domain": true }
   ],
 
   "vars": {
