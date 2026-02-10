@@ -28,7 +28,7 @@ pub fn default_api_base_url() -> String {
             let t = s.trim().to_string();
             if t.is_empty() { None } else { Some(t) }
         })
-        .unwrap_or_else(|| "https://game-dev-memory-api.radiantclay.workers.dev".to_string())
+        .unwrap_or_else(|| "https://api-game-dev-memory.pajamadot.com".to_string())
 }
 
 pub fn config_path() -> Result<PathBuf> {
@@ -61,4 +61,3 @@ pub fn save_config(cfg: &Config) -> Result<()> {
     fs::write(&path, format!("{text}\n")).with_context(|| format!("write config {}", path.display()))?;
     Ok(())
 }
-

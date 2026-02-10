@@ -45,7 +45,7 @@ Set these in the Vercel project settings:
 
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
-- `NEXT_PUBLIC_MEMORY_API_URL` (recommended: `https://api.game-dev-memory.pajamadot.com`)
+- `NEXT_PUBLIC_MEMORY_API_URL` (recommended: `https://api-game-dev-memory.pajamadot.com`)
 
 ## API (Cloudflare Workers)
 
@@ -89,8 +89,12 @@ In production this should be `https://game-dev-memory.pajamadot.com`.
 
 The Worker is bound to:
 
-- `https://api.game-dev-memory.pajamadot.com` (Memory API base)
-- `https://mcp.game-dev-memory.pajamadot.com` (MCP + OAuth issuer)
+- Primary (preferred, HTTPS works with Universal SSL):
+  - `https://api-game-dev-memory.pajamadot.com` (Memory API base)
+  - `https://mcp-game-dev-memory.pajamadot.com` (MCP + OAuth issuer)
+- Nested (requires additional certs, otherwise HTTPS handshake fails):
+  - `https://api.game-dev-memory.pajamadot.com`
+  - `https://mcp.game-dev-memory.pajamadot.com`
 
 The web console is served at:
 
