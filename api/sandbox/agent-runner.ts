@@ -33,12 +33,23 @@ type RetrievedAsset = {
   created_at: string;
 };
 
+type RetrievedDocument = {
+  kind: "pageindex";
+  artifact_id: string;
+  project_id: string;
+  node_id: string;
+  title: string;
+  path: string[];
+  excerpt: string;
+  score: number;
+};
+
 type AskResponse = {
   ok: boolean;
   query: string;
   project_id: string | null;
   provider?: { kind: "none" | "anthropic"; model?: string };
-  retrieved: { memories: RetrievedMemory[]; assets_index: Record<string, RetrievedAsset[]> };
+  retrieved: { memories: RetrievedMemory[]; assets_index: Record<string, RetrievedAsset[]>; documents?: RetrievedDocument[] };
   answer: string | null;
   notes?: string[];
 };
@@ -49,7 +60,7 @@ type RunnerOutput = {
   projectId: string;
   query: string;
   provider: { kind: "none" | "anthropic"; model?: string };
-  retrieved: { memories: RetrievedMemory[]; assets_index: Record<string, RetrievedAsset[]> };
+  retrieved: { memories: RetrievedMemory[]; assets_index: Record<string, RetrievedAsset[]>; documents?: RetrievedDocument[] };
   answer: string | null;
   notes: string[];
   error?: string;
@@ -240,6 +251,17 @@ function buildEvidenceContext(retrieved: AskResponse["retrieved"]): string {
   if (retrieved.memories.length === 0) {
     ctxLines.push("- (none matched)");
   }
+
+  const docs = Array.isArray(retrieved.documents) ? retrieved.documents : [];
+  if (docs.length) {
+    ctxLines.push("");
+    ctxLines.push("DOCUMENT INDEX MATCHES:");
+    for (const d of docs.slice(0, 12)) {
+      ctxLines.push(`- [doc:${d.artifact_id}#${d.node_id}] score=${Number(d.score || 0).toFixed(0)} title=${d.title}`);
+      if (Array.isArray(d.path) && d.path.length) ctxLines.push(`  path: ${d.path.slice(-5).join(" > ")}`);
+      if (d.excerpt) ctxLines.push(`  excerpt: ${excerpt(String(d.excerpt || ""), 900)}`);
+    }
+  }
   return ctxLines.join("\n");
 }
 
@@ -284,6 +306,17 @@ function mergeRetrieved(
     idx[k] = existing;
   }
 
+  const docs = Array.isArray(into.documents) ? into.documents : ((into as any).documents = []);
+  const nextDocs = Array.isArray(next.documents) ? next.documents : [];
+  const seenDocs = new Set(docs.map((d: any) => `${String(d.artifact_id)}#${String(d.node_id)}`));
+  for (const d of nextDocs) {
+    if (!d || !d.artifact_id || !d.node_id) continue;
+    const key = `${String((d as any).artifact_id)}#${String((d as any).node_id)}`;
+    if (seenDocs.has(key)) continue;
+    docs.push(d as any);
+    seenDocs.add(key);
+  }
+
   return into;
 }
 
@@ -322,13 +355,14 @@ async function main(): Promise<void> {
       query,
       project_id: projectId,
       include_assets: includeAssets,
+      include_documents: true,
       dry_run: true, // retrieval only; synthesis happens here with conversation history
       limit: evidenceLimit,
     }),
   })) as AskResponse;
 
   const retrieved = ask?.retrieved || { memories: [], assets_index: {} };
-  trace({ type: "evidence", sessionId, memoryCount: retrieved.memories.length });
+  trace({ type: "evidence", sessionId, memoryCount: retrieved.memories.length, docCount: Array.isArray(retrieved.documents) ? retrieved.documents.length : 0 });
 
   let provider: RunnerOutput["provider"] = { kind: "none" };
   let answer: string | null = null;
@@ -357,6 +391,13 @@ async function main(): Promise<void> {
             project_id: { type: "string", description: "Optional project id override (defaults to the current session project)." },
             limit: { type: "integer", minimum: 1, maximum: 50 },
             include_assets: { type: "boolean", description: "Whether to include linked asset metadata in results." },
+            include_documents: { type: "boolean", description: "Whether to include document index matches (PageIndex artifacts)." },
+            document_limit: { type: "integer", minimum: 0, maximum: 50, description: "Max document evidence items to return (0 disables)." },
+            retrieval_mode: {
+              type: "string",
+              enum: ["auto", "memories", "documents", "hybrid"],
+              description: "Retrieval mode hint. Use documents/hybrid when searching manuals/specs/PDF sections.",
+            },
           },
           required: ["query"],
           additionalProperties: false,
@@ -386,12 +427,14 @@ async function main(): Promise<void> {
       "Use ONLY project memories and asset contents/metadata as evidence.",
       "If evidence is insufficient, say so and propose exactly what to record/upload next.",
       "Cite memories as [mem:<uuid>] and assets as [asset:<uuid>] when used.",
+      "Cite documents as [doc:<artifact_uuid>#<node_id>] when used.",
       "Keep the answer concise and action-oriented.",
     ].join("\n");
 
     const mergedRetrieved: AskResponse["retrieved"] = {
       memories: [...(retrieved.memories || [])],
       assets_index: { ...(retrieved.assets_index || {}) },
+      documents: Array.isArray((retrieved as any).documents) ? ([...((retrieved as any).documents as any[])] as any) : [],
     };
     const extraAssets: RetrievedAsset[] = [];
 
@@ -446,6 +489,10 @@ async function main(): Promise<void> {
             const pid = typeof anyInput.project_id === "string" && anyInput.project_id.trim() ? anyInput.project_id.trim() : projectId;
             const lim = clampInt(String(anyInput.limit ?? ""), evidenceLimit, 1, 50);
             const inc = typeof anyInput.include_assets === "boolean" ? anyInput.include_assets : includeAssets;
+            const incDocs = typeof anyInput.include_documents === "boolean" ? anyInput.include_documents : true;
+            const docLim = clampInt(String(anyInput.document_limit ?? ""), 8, 0, 50);
+            const modeRaw = typeof anyInput.retrieval_mode === "string" ? anyInput.retrieval_mode.trim().toLowerCase() : "";
+            const retrieval_mode = modeRaw === "memories" || modeRaw === "documents" || modeRaw === "hybrid" ? modeRaw : "auto";
 
             const more: AskResponse = (await memoryApiJson(apiBaseUrl, authorization, "/api/agent/ask", {
               method: "POST",
@@ -453,6 +500,9 @@ async function main(): Promise<void> {
                 query: q,
                 project_id: pid,
                 include_assets: inc,
+                include_documents: incDocs,
+                document_limit: docLim,
+                retrieval_mode,
                 dry_run: true,
                 limit: lim,
               }),
@@ -462,6 +512,8 @@ async function main(): Promise<void> {
               mergeRetrieved(mergedRetrieved, more.retrieved);
             }
 
+            const docs = Array.isArray(more?.retrieved?.documents) ? more!.retrieved!.documents! : [];
+
             toolResults.push({
               type: "tool_result",
               tool_use_id: tu.id,
@@ -469,6 +521,7 @@ async function main(): Promise<void> {
                 ok: true,
                 query: q,
                 memory_count: (more?.retrieved?.memories || []).length,
+                document_count: docs.length,
                 memories: (more?.retrieved?.memories || []).slice(0, 12).map((m) => ({
                   id: m.id,
                   category: m.category,
@@ -476,10 +529,26 @@ async function main(): Promise<void> {
                   updated_at: m.updated_at,
                   excerpt: m.content_excerpt,
                 })),
+                documents: docs.slice(0, 8).map((d) => ({
+                  kind: d.kind,
+                  artifact_id: d.artifact_id,
+                  node_id: d.node_id,
+                  title: d.title,
+                  score: d.score,
+                  path: d.path,
+                  excerpt: d.excerpt,
+                })),
               }),
             });
 
-            trace({ type: "tool_result", sessionId, name, ok: true, memories: (more?.retrieved?.memories || []).length });
+            trace({
+              type: "tool_result",
+              sessionId,
+              name,
+              ok: true,
+              memories: (more?.retrieved?.memories || []).length,
+              documents: docs.length,
+            });
             continue;
           }
 
@@ -576,6 +645,7 @@ async function main(): Promise<void> {
     // Replace retrieval output with the merged evidence we actually used.
     (retrieved as any).memories = mergedRetrieved.memories;
     (retrieved as any).assets_index = mergedRetrieved.assets_index;
+    (retrieved as any).documents = (mergedRetrieved as any).documents || [];
   }
 
   if (!answer) {

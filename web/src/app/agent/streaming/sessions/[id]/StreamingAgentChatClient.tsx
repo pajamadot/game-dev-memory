@@ -40,12 +40,30 @@ function roleFromCategory(category: string): "user" | "assistant" {
   return category === "agent_assistant" ? "assistant" : "user";
 }
 
-function extractEvidence(ctx: any): { memoryIds: string[]; assetIds: string[] } {
+function extractEvidence(ctx: any): { memoryIds: string[]; assetIds: string[]; docRefs: string[] } {
   const mem = ctx?.evidence?.memory_ids;
   const assets = ctx?.evidence?.asset_ids;
+  const docs = ctx?.evidence?.documents;
   const memoryIds = Array.isArray(mem) ? mem.filter((x) => typeof x === "string").slice(0, 50) : [];
   const assetIds = Array.isArray(assets) ? assets.filter((x) => typeof x === "string").slice(0, 50) : [];
-  return { memoryIds, assetIds };
+  const docRefs: string[] = [];
+  if (Array.isArray(docs)) {
+    for (const d of docs) {
+      if (typeof d === "string") {
+        if (!docRefs.includes(d)) docRefs.push(d);
+        continue;
+      }
+      if (d && typeof d === "object") {
+        const aid = String((d as any).artifact_id || "").trim();
+        const nid = String((d as any).node_id || "").trim();
+        if (!aid || !nid) continue;
+        const ref = `${aid}#${nid}`;
+        if (!docRefs.includes(ref)) docRefs.push(ref);
+      }
+      if (docRefs.length >= 50) break;
+    }
+  }
+  return { memoryIds, assetIds, docRefs };
 }
 
 async function readSseStream(res: Response, onEvent: (ev: any) => void) {
@@ -157,8 +175,69 @@ export function StreamingAgentChatClient(props: {
         throw new Error(`Agent failed (${res.status}): ${text || res.statusText}`);
       }
 
+      let appendedAssistant = false;
       await readSseStream(res, (ev) => {
         setEvents((prev) => [...prev.slice(-200), ev]);
+
+        if (!ev || typeof ev !== "object") return;
+        const type = String((ev as any).type || "");
+        if (type !== "done" || appendedAssistant) return;
+        appendedAssistant = true;
+
+        const answer = typeof (ev as any).answer === "string" ? (ev as any).answer.trim() : "";
+        if (!answer) return;
+
+        const retrieved = ((ev as any).retrieved || {}) as any;
+        const memoryIds = Array.isArray(retrieved.memories)
+          ? retrieved.memories
+              .map((m: any) => String(m?.id || "").trim())
+              .filter(Boolean)
+              .slice(0, 50)
+          : [];
+
+        const assetIds: string[] = [];
+        const idx = (retrieved.assets_index || {}) as Record<string, any[]>;
+        for (const assets of Object.values(idx)) {
+          for (const a of assets || []) {
+            const id = String((a as any).id || "").trim();
+            if (!id) continue;
+            if (assetIds.includes(id)) continue;
+            assetIds.push(id);
+            if (assetIds.length >= 50) break;
+          }
+          if (assetIds.length >= 50) break;
+        }
+
+        const documents = Array.isArray(retrieved.documents) ? (retrieved.documents as any[]) : [];
+        const docRefs: string[] = [];
+        for (const d of documents) {
+          const aid = String((d as any)?.artifact_id || "").trim();
+          const nid = String((d as any)?.node_id || "").trim();
+          if (!aid || !nid) continue;
+          const ref = `${aid}#${nid}`;
+          if (docRefs.includes(ref)) continue;
+          docRefs.push(ref);
+          if (docRefs.length >= 50) break;
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: String((ev as any).assistant_message_id || `local-assistant-${Date.now()}`),
+            category: "agent_assistant",
+            title: "Assistant",
+            content: answer,
+            context: {
+              role: "assistant",
+              evidence: {
+                memory_ids: memoryIds,
+                asset_ids: assetIds,
+                documents: docRefs.map((r: string) => ({ artifact_id: r.split("#")[0], node_id: r.split("#")[1] })),
+              },
+            },
+            created_at: new Date().toISOString(),
+          } as any,
+        ]);
       });
 
       // Canonical refresh after the run (assistant message is persisted by the API).
@@ -195,10 +274,10 @@ export function StreamingAgentChatClient(props: {
             Back to sessions
           </Link>
           <Link
-            href="/agent"
+            href="/agent/ask"
             className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
           >
-            Standard agent
+            One-shot ask
           </Link>
           <Link
             href="/assets"
@@ -231,7 +310,7 @@ export function StreamingAgentChatClient(props: {
                         <p className="text-[11px] text-zinc-500">{fmt(m.created_at)}</p>
                       </div>
                       <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-800">{m.content}</p>
-                      {ev && (ev.memoryIds.length || ev.assetIds.length) ? (
+                      {ev && (ev.memoryIds.length || ev.assetIds.length || ev.docRefs.length) ? (
                         <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
                           <p className="text-[11px] font-semibold text-zinc-900">Evidence</p>
                           {ev.memoryIds.length ? (
@@ -257,6 +336,15 @@ export function StreamingAgentChatClient(props: {
                                 >
                                   asset:{id.slice(0, 8)}
                                 </Link>
+                              ))}
+                            </div>
+                          ) : null}
+                          {ev.docRefs.length ? (
+                            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-zinc-700">
+                              {ev.docRefs.slice(0, 12).map((ref) => (
+                                <span key={ref} className="font-mono">
+                                  doc:{ref}
+                                </span>
                               ))}
                             </div>
                           ) : null}

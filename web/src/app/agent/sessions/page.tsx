@@ -47,10 +47,10 @@ export default async function AgentSessionsPage() {
                 </button>
               </SignInButton>
               <Link
-                href="/agent"
+                href="/agent/ask"
                 className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-300 bg-white px-5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
               >
-                Back to agent
+                One-shot ask
               </Link>
             </div>
           </div>
@@ -79,7 +79,7 @@ export default async function AgentSessionsPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href="/agent"
+              href="/agent/ask"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
               Ask

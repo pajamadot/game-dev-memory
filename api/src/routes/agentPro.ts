@@ -435,7 +435,7 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
         const success = Boolean(output && output.success !== false && exitCode === 0);
         const answer = output?.answer ? String(output.answer) : null;
         const provider = output?.provider || { kind: "none" };
-        const retrieved = output?.retrieved || { memories: [], assets_index: {} };
+        const retrieved = output?.retrieved || { memories: [], assets_index: {}, documents: [] };
         const errorMessage = output?.error ? String(output.error) : !success ? "Sandbox run failed" : null;
 
         let assistantMessageId: string | null = null;
@@ -453,6 +453,13 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
             }
             if (evidence_asset_ids.length >= 200) break;
           }
+
+          const evidence_documents = Array.isArray((retrieved as any)?.documents)
+            ? ((retrieved as any).documents as any[])
+                .filter((d) => d && d.artifact_id && d.node_id)
+                .slice(0, 100)
+                .map((d) => ({ artifact_id: String(d.artifact_id), node_id: String(d.node_id) }))
+            : [];
 
           assistantMessageId = crypto.randomUUID();
           await withDbClient(c.env, async (db) => {
@@ -473,7 +480,7 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
                 mode: "pro",
                 provider,
                 session_id: sessionId,
-                evidence: { memory_ids: evidence_memory_ids, asset_ids: evidence_asset_ids },
+                evidence: { memory_ids: evidence_memory_ids, asset_ids: evidence_asset_ids, documents: evidence_documents },
               },
               confidence: 0.6,
               nowIso: new Date().toISOString(),
