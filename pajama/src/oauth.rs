@@ -35,6 +35,14 @@ struct TokenResponse {
     scope: Option<String>,
 }
 
+fn oauth_callback_timeout_secs() -> u64 {
+    std::env::var("PAJAMA_OAUTH_CALLBACK_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(900)
+}
+
 pub async fn discover_oauth(api_base_url: &str) -> Result<OAuthMetadata> {
     let base = api_base_url.trim_end_matches('/');
     let url = format!("{base}/.well-known/oauth-authorization-server");
@@ -190,8 +198,8 @@ async fn wait_for_oauth_callback(
         }
     });
 
-    // Wait up to 3 minutes for the auth callback.
-    let code = timeout(Duration::from_secs(180), rx)
+    let timeout_secs = oauth_callback_timeout_secs();
+    let code = timeout(Duration::from_secs(timeout_secs), rx)
         .await
         .context("timeout waiting for oauth callback")?
         .context("oauth callback channel closed")??;
