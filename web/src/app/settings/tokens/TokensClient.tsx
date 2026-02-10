@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { createApiToken, revokeApiToken } from "./actions";
 
@@ -39,6 +40,11 @@ npm i -g @pajamadot/pajama
 pajama login
 pajama projects list
         </pre>
+        <p className="mt-3 text-xs text-zinc-600">
+          <Link className="font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800" href="/docs/cli">
+            Full CLI docs
+          </Link>
+        </p>
         <p className="mt-3 text-xs text-zinc-600">
           Default API base: <span className="font-mono">https://api-game-dev-memory.pajamadot.com</span> (override with{" "}
           <span className="font-mono">PAJAMA_API_URL</span>).

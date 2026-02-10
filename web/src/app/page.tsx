@@ -167,6 +167,14 @@ export default async function Home() {
 npm i -g @pajamadot/pajama
 pajama login
                 </pre>
+                <div className="mt-3">
+                  <Link
+                    href="/docs/cli"
+                    className="text-xs font-medium text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-800"
+                  >
+                    Full CLI docs
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
@@ -226,6 +234,12 @@ pajama login
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
               API Keys
+            </Link>
+            <Link
+              href="/docs/cli"
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
+            >
+              CLI Docs
             </Link>
             <Link
               href="/research"

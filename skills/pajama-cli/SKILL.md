@@ -78,8 +78,32 @@ pajama assets upload --project-id <project-uuid> --path "C:\\tmp\\build.zip"
 pajama assets list --project-id <project-uuid>
 ```
 
+## Recording Memory (Agent Session Pattern)
+
+Use this when you want the agent to leave durable, searchable traces of what it did (and attach evidence files):
+
+1) Write a memory entry (facts + decisions + next steps).
+2) Upload raw evidence (logs, zips, traces) as assets and link them to that memory.
+3) Verify links so retrieval stays evidence-first.
+
+Example: create a memory, then attach a log file:
+
+```powershell
+$project = "<project-uuid>"
+$mem = pajama memories create --project-id $project --category session-summary --title "Fix build break" --content "What changed, why, and what's next" --tags "build,ci,fix"
+
+# Link a file to that memory for later inspection
+pajama assets upload --project-id $project --memory-id $mem --path "C:\\tmp\\build.log"
+
+# Verify the link
+pajama assets list --memory-id $mem
+```
+
+Tip: prefer categories that match retrieval intent (`build-error`, `bug`, `decision`, `playtest`, `perf`, `release`, `session-summary`).
+
 ## When To Use This Skill
 
 - You changed auth/OAuth and need to validate the full browser login loop.
 - You changed Memory API endpoints and want a stable, repeatable way to exercise them.
 - You are building ingestion tooling (UE logs, traces) and want to upload/link large artifacts quickly.
+- You want a reliable "write memory + attach evidence" pattern at the end of an agentic coding session.
