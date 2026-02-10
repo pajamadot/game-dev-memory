@@ -16,6 +16,21 @@ const EVENTS_PATH = process.env.EVOLVER_EVENTS_PATH
   ? path.resolve(ROOT_DIR, process.env.EVOLVER_EVENTS_PATH)
   : path.resolve(ROOT_DIR, ".data/events.jsonl");
 
+function mutationWorkCount(result) {
+  if (!result || typeof result !== "object") return 0;
+
+  const directCounts = ["created", "optimized", "repaired", "deleted", "updated"];
+  for (const k of directCounts) {
+    const v = result[k];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  }
+
+  const ids = result.created_ids;
+  if (Array.isArray(ids) && ids.length > 0) return ids.length;
+
+  return 0;
+}
+
 function authHeaders() {
   const apiKey =
     process.env.MEMORY_API_KEY ||
@@ -119,6 +134,12 @@ async function evolve({ review, projectId, drift, apiUrl }) {
 
   // 6. Execute mutation
   const result = await executeMutation(mutation, apiUrl);
+
+  // Keep long loops safe: avoid spamming evolution events when the mutation was a no-op.
+  if (result && result.success && mutationWorkCount(result) === 0) {
+    console.log(`[evolve] No-op mutation (${selectedGene.id}); skipping event record.`);
+    return { status: "no_action", signals, selector, mutation, result };
+  }
 
   // 7. Record evolution event
   const event = {

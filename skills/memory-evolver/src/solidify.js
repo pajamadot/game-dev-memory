@@ -10,8 +10,35 @@ const fs = require("fs");
 const path = require("path");
 
 const CAPSULES_PATH = path.resolve(__dirname, "../assets/genes/capsules.json");
-const EVENTS_PATH = path.resolve(__dirname, "../assets/genes/events.jsonl");
+const ROOT_DIR = path.resolve(__dirname, "..");
+const EVENTS_PATH = process.env.EVOLVER_EVENTS_PATH
+  ? path.resolve(ROOT_DIR, process.env.EVOLVER_EVENTS_PATH)
+  : path.resolve(ROOT_DIR, ".data/events.jsonl");
 const STATE_PATH = path.resolve(__dirname, "../assets/genes/solidify_state.json");
+
+function authHeaders() {
+  const apiKey =
+    process.env.MEMORY_API_KEY ||
+    process.env.MEMORY_API_TOKEN ||
+    process.env.GDM_API_KEY ||
+    process.env.GDM_API_TOKEN ||
+    null;
+
+  if (apiKey) {
+    return { Authorization: `Bearer ${apiKey}` };
+  }
+
+  // Legacy fallback for local-only testing (requires ALLOW_INSECURE_TENANT_HEADERS=true in the Worker env).
+  const tenantType = process.env.MEMORY_TENANT_TYPE;
+  const tenantId = process.env.MEMORY_TENANT_ID;
+  const actorId = process.env.MEMORY_ACTOR_ID || process.env.MEMORY_TENANT_ACTOR_ID || null;
+  if (!tenantType || !tenantId) return {};
+  return {
+    "X-Tenant-Type": tenantType,
+    "X-Tenant-Id": tenantId,
+    ...(actorId ? { "X-Actor-Id": actorId } : {}),
+  };
+}
 
 /**
  * Solidify the most recent evolution results.
@@ -73,13 +100,13 @@ async function solidify({ dryRun, noRollback, intent, summary, apiUrl }) {
 async function validateEvolution(event, apiUrl) {
   try {
     // Check API is healthy
-    const res = await fetch(`${apiUrl}/api/evolve/signals`);
+    const res = await fetch(`${apiUrl}/api/evolve/signals`, { headers: authHeaders() });
     if (!res.ok) {
       return { valid: false, reason: "API unreachable during validation" };
     }
 
     // Check the event was recorded
-    const eventsRes = await fetch(`${apiUrl}/api/evolve/events?limit=5`);
+    const eventsRes = await fetch(`${apiUrl}/api/evolve/events?limit=5`, { headers: authHeaders() });
     if (eventsRes.ok) {
       const { events } = await eventsRes.json();
       const found = events.find((e) => e.description === event.mutation_summary);
@@ -89,7 +116,7 @@ async function validateEvolution(event, apiUrl) {
     }
 
     // Basic sanity: check memory count hasn't dropped catastrophically
-    const memRes = await fetch(`${apiUrl}/api/memories?limit=1`);
+    const memRes = await fetch(`${apiUrl}/api/memories?limit=1`, { headers: authHeaders() });
     if (memRes.ok) {
       return { valid: true };
     }
@@ -115,7 +142,7 @@ async function rollback(event, apiUrl) {
   try {
     await fetch(`${apiUrl}/api/evolve/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(rollbackEvent),
     });
     console.log("[solidify] Rollback event recorded.");
