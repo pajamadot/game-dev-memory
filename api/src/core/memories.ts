@@ -44,7 +44,21 @@ export interface ListMemoriesQuery {
   tag?: string | null;
   sessionId?: string | null;
   states?: MemoryState[] | null;
+  excludeCategoryPrefixes?: string[] | null;
+  mode?: "full" | "retrieval";
   limit?: number | null;
+}
+
+function escapeLike(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+function stripScore<T extends Record<string, unknown>>(rows: T[]): T[] {
+  return rows.map((r) => {
+    const out = { ...r };
+    delete (out as any)._score;
+    return out;
+  });
 }
 
 export async function listMemories(
@@ -59,14 +73,22 @@ export async function listMemories(
   const tag = q.tag || null;
   const sessionId = q.sessionId || null;
   const states = q.states;
+  const excludeCategoryPrefixes = Array.isArray(q.excludeCategoryPrefixes)
+    ? q.excludeCategoryPrefixes.map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean).slice(0, 16)
+    : [];
+  const mode = q.mode === "retrieval" ? "retrieval" : "full";
   const limit = Math.min(Math.max(q.limit || 50, 1), 200);
+  const selectClause =
+    mode === "retrieval"
+      ? "SELECT id, project_id, category, title, content, tags, confidence, updated_at, state, quality, source_type, session_id"
+      : "SELECT *";
 
-  let query = "SELECT * FROM memories WHERE tenant_type = $1 AND tenant_id = $2";
+  let where = "FROM memories WHERE tenant_type = $1 AND tenant_id = $2";
   const params: unknown[] = [tenantType, tenantId];
 
   if (projectId) {
     params.push(projectId);
-    query += ` AND project_id = $${params.length}`;
+    where += ` AND project_id = $${params.length}`;
   }
 
   // Default to active memories only unless caller explicitly requests otherwise.
@@ -75,55 +97,98 @@ export async function listMemories(
     states === null ? null : Array.isArray(states) && states.length > 0 ? states : (["active"] as MemoryState[]);
   if (effectiveStates) {
     params.push(effectiveStates);
-    query += ` AND state = ANY($${params.length}::text[])`;
+    where += ` AND state = ANY($${params.length}::text[])`;
   }
 
   if (category) {
     params.push(category);
-    query += ` AND category = $${params.length}`;
+    where += ` AND category = $${params.length}`;
   }
   if (sessionId) {
     params.push(sessionId);
-    query += ` AND session_id = $${params.length}`;
+    where += ` AND session_id = $${params.length}`;
   }
   if (tag) {
     params.push(tag);
-    query += ` AND tags ? $${params.length}`;
+    where += ` AND tags ? $${params.length}`;
   }
+  for (const prefix of excludeCategoryPrefixes) {
+    params.push(`${prefix}%`);
+    where += ` AND category NOT LIKE $${params.length}`;
+  }
+
   if (search) {
-    // Hybrid retrieval:
-    // - FTS (GIN) for relevance
-    // - ILIKE fallback for odd tokens (paths, ids) that FTS may miss
-    const tsq = search;
-    const ilike = `%${search}%`;
-    params.push(tsq);
-    const tsIdx = params.length;
-    params.push(ilike);
-    const likeIdx = params.length;
-
+    // Two-phase retrieval for performance and relevance:
+    // 1) FTS with rank (uses GIN index)
+    // 2) ILIKE fallback only if needed to fill remaining slots
+    const tsq = search.trim();
     const vecExpr = "to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, ''))";
-    const tsqExpr = `websearch_to_tsquery('simple', $${tsIdx})`;
 
-    query += ` AND (${vecExpr} @@ ${tsqExpr} OR title ILIKE $${likeIdx} OR content ILIKE $${likeIdx})`;
+    try {
+      const ftsParams = [...params];
+      ftsParams.push(tsq);
+      const tsIdx = ftsParams.length;
+      ftsParams.push(limit);
+      const limIdx = ftsParams.length;
 
-    // Rank primarily by FTS relevance; add small recency+confidence tiebreakers.
-    // NOTE: Keep formula stable; avoid huge weights that cause surprising ordering.
-    const scoreExpr = `(
-      ts_rank_cd(${vecExpr}, ${tsqExpr}) * 10.0
-      + (1.0 / (1.0 + (EXTRACT(EPOCH FROM (now() - updated_at)) / 86400.0)))
-      + (confidence * 0.25)
-      + CASE quality WHEN 'good' THEN 0.2 WHEN 'bad' THEN -0.5 ELSE 0.0 END
-    )`;
+      const scoreExpr = `(
+        ts_rank_cd(${vecExpr}, websearch_to_tsquery('simple', $${tsIdx})) * 10.0
+        + (1.0 / (1.0 + (EXTRACT(EPOCH FROM (now() - updated_at)) / 86400.0)))
+        + (confidence * 0.25)
+        + CASE quality WHEN 'good' THEN 0.2 WHEN 'bad' THEN -0.5 ELSE 0.0 END
+      )`;
 
-    params.push(limit);
-    query += ` ORDER BY ${scoreExpr} DESC, updated_at DESC LIMIT $${params.length}`;
+      const ftsSql = `${selectClause}, ${scoreExpr} AS _score ${where}
+        AND ${vecExpr} @@ websearch_to_tsquery('simple', $${tsIdx})
+        ORDER BY _score DESC, updated_at DESC
+        LIMIT $${limIdx}`;
 
-    const { rows } = await db.query(query, params);
-    return rows;
+      const ftsRows = (await db.query(ftsSql, ftsParams)).rows as Record<string, unknown>[];
+      if (ftsRows.length >= limit) return stripScore(ftsRows);
+
+      const remaining = limit - ftsRows.length;
+      const ilike = `%${escapeLike(tsq)}%`;
+      const likeParams = [...params];
+      likeParams.push(ilike);
+      const likeIdx = likeParams.length;
+
+      let dedupeClause = "";
+      if (ftsRows.length > 0) {
+        likeParams.push(ftsRows.map((r) => String((r as any).id)));
+        const dedupeIdx = likeParams.length;
+        dedupeClause = ` AND id <> ALL($${dedupeIdx}::uuid[])`;
+      }
+
+      likeParams.push(remaining);
+      const likeLimIdx = likeParams.length;
+
+      const likeSql = `${selectClause} ${where}
+        AND (title ILIKE $${likeIdx} ESCAPE '\\\\' OR content ILIKE $${likeIdx} ESCAPE '\\\\')
+        ${dedupeClause}
+        ORDER BY updated_at DESC
+        LIMIT $${likeLimIdx}`;
+
+      const likeRows = (await db.query(likeSql, likeParams)).rows as Record<string, unknown>[];
+      return [...stripScore(ftsRows), ...likeRows];
+    } catch {
+      // Fallback-only path for unusual FTS parse edge cases.
+      const ilike = `%${escapeLike(tsq)}%`;
+      const likeParams = [...params];
+      likeParams.push(ilike);
+      const likeIdx = likeParams.length;
+      likeParams.push(limit);
+      const limIdx = likeParams.length;
+      const likeSql = `${selectClause} ${where}
+        AND (title ILIKE $${likeIdx} ESCAPE '\\\\' OR content ILIKE $${likeIdx} ESCAPE '\\\\')
+        ORDER BY updated_at DESC
+        LIMIT $${limIdx}`;
+      const { rows } = await db.query(likeSql, likeParams);
+      return rows;
+    }
   }
 
   params.push(limit);
-  query += ` ORDER BY updated_at DESC LIMIT $${params.length}`;
+  const query = `${selectClause} ${where} ORDER BY updated_at DESC LIMIT $${params.length}`;
 
   const { rows } = await db.query(query, params);
   return rows;

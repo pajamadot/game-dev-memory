@@ -529,6 +529,13 @@ async function main(): Promise<void> {
       documents: Array.isArray((retrieved as any).documents) ? ([...((retrieved as any).documents as any[])] as any) : [],
     };
     const extraAssets: RetrievedAsset[] = [];
+    const searchEvidenceCache = new Map<string, AskResponse>();
+    const listAssetsCache = new Map<string, any>();
+    const listArtifactsCache = new Map<string, any>();
+    const assetMetaCache = new Map<string, any>();
+    const assetTextCache = new Map<string, { text: string; truncated: boolean; byteLength: number }>();
+    const docNodeCache = new Map<string, any>();
+    const indexArtifactCache = new Map<string, any>();
 
     const older = history.length > 0 ? history.slice(0, Math.max(0, history.length - 1)) : [];
     const messages: AnthropicMessage[] = [...older.map((m) => ({ role: m.role, content: m.content }))];
@@ -585,20 +592,35 @@ async function main(): Promise<void> {
             const docLim = clampInt(String(anyInput.document_limit ?? ""), 8, 0, 50);
             const modeRaw = typeof anyInput.retrieval_mode === "string" ? anyInput.retrieval_mode.trim().toLowerCase() : "";
             const retrieval_mode = modeRaw === "memories" || modeRaw === "documents" || modeRaw === "hybrid" ? modeRaw : "auto";
+            const cacheKey = JSON.stringify({
+              q,
+              pid,
+              lim,
+              inc,
+              incDocs,
+              docLim,
+              retrieval_mode,
+            });
 
-            const more: AskResponse = (await memoryApiJson(apiBaseUrl, authorization, "/api/agent/ask", {
-              method: "POST",
-              body: JSON.stringify({
-                query: q,
-                project_id: pid,
-                include_assets: inc,
-                include_documents: incDocs,
-                document_limit: docLim,
-                retrieval_mode,
-                dry_run: true,
-                limit: lim,
-              }),
-            })) as AskResponse;
+            let more = searchEvidenceCache.get(cacheKey);
+            if (!more) {
+              more = (await memoryApiJson(apiBaseUrl, authorization, "/api/agent/ask", {
+                method: "POST",
+                body: JSON.stringify({
+                  query: q,
+                  project_id: pid,
+                  include_assets: inc,
+                  include_documents: incDocs,
+                  document_limit: docLim,
+                  retrieval_mode,
+                  dry_run: true,
+                  limit: lim,
+                }),
+              })) as AskResponse;
+              searchEvidenceCache.set(cacheKey, more);
+            } else {
+              trace({ type: "cache_hit", sessionId, tool: name });
+            }
 
             if (more && more.retrieved) {
               mergeRetrieved(mergedRetrieved, more.retrieved);
@@ -651,8 +673,15 @@ async function main(): Promise<void> {
             const byteStart = typeof anyInput.byte_start === "number" && Number.isFinite(anyInput.byte_start) ? Math.trunc(anyInput.byte_start) : 0;
             const maxBytes = clampInt(String(anyInput.max_bytes ?? ""), 40_000, 256, 120_000);
             if (byteStart < 0) throw new Error("byte_start must be >= 0");
+            const textCacheKey = `${assetId}:${byteStart}:${maxBytes}`;
+            const cachedText = assetTextCache.get(textCacheKey);
 
-            const meta = await memoryApiJson(apiBaseUrl, authorization, `/api/assets/${encodeURIComponent(assetId)}`);
+            const cachedMeta = assetMetaCache.get(assetId);
+            const meta = cachedMeta
+              ? cachedMeta
+              : await memoryApiJson(apiBaseUrl, authorization, `/api/assets/${encodeURIComponent(assetId)}`);
+            if (!cachedMeta) assetMetaCache.set(assetId, meta);
+            else trace({ type: "cache_hit", sessionId, tool: `${name}:meta` });
             const status = meta?.status ? String(meta.status) : "";
             const contentType = meta?.content_type ? String(meta.content_type) : null;
             const byteSize = meta?.byte_size ? Number(meta.byte_size) : null;
@@ -666,22 +695,35 @@ async function main(): Promise<void> {
             }
 
             const byteEnd = byteStart + maxBytes - 1;
-            const { bytes } = await memoryApiBytes(
-              apiBaseUrl,
-              authorization,
-              `/api/assets/${encodeURIComponent(assetId)}/object?byte_start=${byteStart}&byte_end=${byteEnd}`,
-              { timeoutMs: 45_000 }
-            );
+            let preview = "";
+            let truncated = false;
+            let readBytes = 0;
+            if (cachedText) {
+              trace({ type: "cache_hit", sessionId, tool: name });
+              preview = cachedText.text;
+              truncated = cachedText.truncated;
+              readBytes = cachedText.byteLength;
+            } else {
+              const { bytes } = await memoryApiBytes(
+                apiBaseUrl,
+                authorization,
+                `/api/assets/${encodeURIComponent(assetId)}/object?byte_start=${byteStart}&byte_end=${byteEnd}`,
+                { timeoutMs: 45_000 }
+              );
 
-            const text = new TextDecoder().decode(bytes);
-            const preview = excerpt(text, 12_000);
+              const text = new TextDecoder().decode(bytes);
+              preview = excerpt(text, 12_000);
+              truncated = preview.length < text.length;
+              readBytes = bytes.length;
+              assetTextCache.set(textCacheKey, { text: preview, truncated, byteLength: readBytes });
+            }
 
             const assetSummary: RetrievedAsset = {
               id: assetId,
               project_id: meta?.project_id ? String(meta.project_id) : projectId,
               status: status || "ready",
               content_type: contentType || "text/plain",
-              byte_size: typeof byteSize === "number" && Number.isFinite(byteSize) ? Math.trunc(byteSize) : bytes.length,
+              byte_size: typeof byteSize === "number" && Number.isFinite(byteSize) ? Math.trunc(byteSize) : readBytes,
               original_name: originalName,
               created_at: meta?.created_at ? String(meta.created_at) : "",
             };
@@ -697,13 +739,13 @@ async function main(): Promise<void> {
                 content_type: contentType,
                 byte_size: byteSize,
                 byte_start: byteStart,
-                byte_end: byteStart + bytes.length - 1,
+                byte_end: byteStart + readBytes - 1,
                 text: preview,
-                truncated: preview.length < text.length,
+                truncated,
               }),
             });
 
-            trace({ type: "tool_result", sessionId, name, ok: true, bytes: bytes.length });
+            trace({ type: "tool_result", sessionId, name, ok: true, bytes: readBytes });
             continue;
           }
 
@@ -721,8 +763,13 @@ async function main(): Promise<void> {
             if (status) qs.push(`status=${encodeURIComponent(status)}`);
             if (includeLinks) qs.push(`include_memory_links=true`);
             qs.push(`limit=${encodeURIComponent(String(lim))}`);
-
-            const data = await memoryApiJson(apiBaseUrl, authorization, `/api/assets?${qs.join("&")}`, { method: "GET" });
+            const cacheKey = JSON.stringify({ pid, q, status, includeLinks, lim });
+            const cached = listAssetsCache.get(cacheKey);
+            const data = cached
+              ? cached
+              : await memoryApiJson(apiBaseUrl, authorization, `/api/assets?${qs.join("&")}`, { method: "GET" });
+            if (!cached) listAssetsCache.set(cacheKey, data);
+            else trace({ type: "cache_hit", sessionId, tool: name });
             const assets = Array.isArray(data?.assets) ? (data.assets as any[]) : [];
 
             toolResults.push({
@@ -831,8 +878,13 @@ async function main(): Promise<void> {
             if (type) qs.push(`type=${encodeURIComponent(type)}`);
             qs.push(`limit=${encodeURIComponent(String(lim))}`);
             qs.push("include_metadata=false");
-
-            const data = await memoryApiJson(apiBaseUrl, authorization, `/api/artifacts?${qs.join("&")}`, { method: "GET" });
+            const cacheKey = JSON.stringify({ pid, type, lim });
+            const cached = listArtifactsCache.get(cacheKey);
+            const data = cached
+              ? cached
+              : await memoryApiJson(apiBaseUrl, authorization, `/api/artifacts?${qs.join("&")}`, { method: "GET" });
+            if (!cached) listArtifactsCache.set(cacheKey, data);
+            else trace({ type: "cache_hit", sessionId, tool: name });
             const artifacts = Array.isArray(data?.artifacts) ? (data.artifacts as any[]) : [];
 
             toolResults.push({
@@ -863,13 +915,18 @@ async function main(): Promise<void> {
             const artifactId = typeof anyInput.artifact_id === "string" ? anyInput.artifact_id.trim() : "";
             if (!artifactId) throw new Error("artifact_id is required");
             const kind = typeof anyInput.kind === "string" && anyInput.kind.trim() ? anyInput.kind.trim() : "auto";
-
-            const data = await memoryApiJson(
-              apiBaseUrl,
-              authorization,
-              `/api/artifacts/${encodeURIComponent(artifactId)}/pageindex`,
-              { method: "POST", body: JSON.stringify({ kind }) }
-            );
+            const cacheKey = `${artifactId}:${kind}`;
+            const cached = indexArtifactCache.get(cacheKey);
+            const data = cached
+              ? cached
+              : await memoryApiJson(
+                  apiBaseUrl,
+                  authorization,
+                  `/api/artifacts/${encodeURIComponent(artifactId)}/pageindex`,
+                  { method: "POST", body: JSON.stringify({ kind }) }
+                );
+            if (!cached) indexArtifactCache.set(cacheKey, data);
+            else trace({ type: "cache_hit", sessionId, tool: name });
 
             toolResults.push({
               type: "tool_result",
@@ -892,13 +949,18 @@ async function main(): Promise<void> {
             const nodeId = typeof anyInput.node_id === "string" ? anyInput.node_id.trim() : "";
             if (!artifactId) throw new Error("artifact_id is required");
             if (!nodeId) throw new Error("node_id is required");
-
-            const data = await memoryApiJson(
-              apiBaseUrl,
-              authorization,
-              `/api/artifacts/${encodeURIComponent(artifactId)}/pageindex/node/${encodeURIComponent(nodeId)}`,
-              { method: "GET" }
-            );
+            const cacheKey = `${artifactId}#${nodeId}`;
+            const cached = docNodeCache.get(cacheKey);
+            const data = cached
+              ? cached
+              : await memoryApiJson(
+                  apiBaseUrl,
+                  authorization,
+                  `/api/artifacts/${encodeURIComponent(artifactId)}/pageindex/node/${encodeURIComponent(nodeId)}`,
+                  { method: "GET" }
+                );
+            if (!cached) docNodeCache.set(cacheKey, data);
+            else trace({ type: "cache_hit", sessionId, tool: name });
 
             // Add this node into the document evidence set so it is persisted as part of the assistant message evidence.
             const title = typeof data?.node?.title === "string" ? data.node.title : typeof data?.node?.name === "string" ? data.node.name : "";

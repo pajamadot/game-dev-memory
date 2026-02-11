@@ -172,14 +172,13 @@ agentRouter.post("/ask", async (c) => {
   }
 
   const { memories, assetsByMemoryId, documents } = await withDbClient(c.env, async (db) => {
-    const rawMemRows = await listMemories(db, tenantType, tenantId, {
+    const memRows = await listMemories(db, tenantType, tenantId, {
       projectId,
       search: query,
       limit,
+      mode: "retrieval",
+      excludeCategoryPrefixes: ["agent_"],
     });
-
-    // Avoid feeding agent chat back into retrieval evidence.
-    const memRows = rawMemRows.filter((m: any) => !String(m?.category || "").startsWith("agent_"));
 
     const memIds = memRows.map((m: any) => String(m.id));
     const assetsByMemoryId = new Map<string, AssetSummary[]>();
@@ -609,11 +608,10 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
       projectId,
       search: message,
       limit: 50,
+      mode: "retrieval",
+      excludeCategoryPrefixes: ["agent_"],
     });
-
-    const evidence = memRows
-      .filter((m: any) => !String(m.category || "").startsWith("agent_"))
-      .slice(0, evidenceLimit);
+    const evidence = memRows.slice(0, evidenceLimit);
 
     const evidenceSummaries = evidence.map(summarizeMemory);
 
