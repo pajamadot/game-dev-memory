@@ -274,12 +274,6 @@ export function StreamingAgentChatClient(props: {
             Back to sessions
           </Link>
           <Link
-            href="/agent/ask"
-            className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
-          >
-            One-shot ask
-          </Link>
-          <Link
             href="/assets"
             className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
           >

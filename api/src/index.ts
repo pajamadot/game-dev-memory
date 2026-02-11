@@ -62,7 +62,6 @@ app.get("/", (c) => {
         streaming_sessions: `${origin}/api/agent-pro/sessions`,
         streaming_session_messages: `${origin}/api/agent-pro/sessions/:id/messages`,
         streaming_continue: `${origin}/api/agent-pro/sessions/:id/continue`,
-        standard_agent_ask: `${origin}/api/agent/ask`,
         memories: `${origin}/api/memories`,
         assets: `${origin}/api/assets`,
         oauth_discovery: `${origin}/.well-known/oauth-authorization-server`,

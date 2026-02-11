@@ -47,10 +47,10 @@ export default async function StreamingAgentSessionsPage() {
                 </button>
               </SignInButton>
               <Link
-                href="/agent/ask"
+                href="/"
                 className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-300 bg-white px-5 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
               >
-                One-shot ask
+                Console
               </Link>
             </div>
           </div>
@@ -79,16 +79,10 @@ export default async function StreamingAgentSessionsPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href="/agent/ask"
+              href="/docs"
               className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
             >
-              Ask
-            </Link>
-            <Link
-              href="/agent/streaming"
-              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50"
-            >
-              About
+              Docs
             </Link>
             <Link
               href="/"
