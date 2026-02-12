@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Context, Result};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use anyhow::{Context, Result, anyhow};
 use base64::Engine;
-use rand::rngs::OsRng;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use reqwest::header;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -48,15 +48,20 @@ pub async fn discover_oauth(api_base_url: &str) -> Result<OAuthMetadata> {
     let url = format!("{base}/.well-known/oauth-authorization-server");
 
     let client = reqwest::Client::new();
-    let res = client.get(url).send().await.context("fetch oauth metadata")?;
+    let res = client
+        .get(url)
+        .send()
+        .await
+        .context("fetch oauth metadata")?;
     let status = res.status();
     let text = res.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(anyhow!("oauth metadata request failed (HTTP {status}): {text}"));
+        return Err(anyhow!(
+            "oauth metadata request failed (HTTP {status}): {text}"
+        ));
     }
 
-    let meta: OAuthMetadata =
-        serde_json::from_str(&text).context("parse oauth metadata json")?;
+    let meta: OAuthMetadata = serde_json::from_str(&text).context("parse oauth metadata json")?;
     Ok(meta)
 }
 
@@ -79,7 +84,9 @@ pub async fn register_client(registration_endpoint: &str, client_name: &str) -> 
     let status = res.status();
     let text = res.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(anyhow!("client registration failed (HTTP {status}): {text}"));
+        return Err(anyhow!(
+            "client registration failed (HTTP {status}): {text}"
+        ));
     }
 
     let parsed: RegisterResponse =
@@ -105,10 +112,7 @@ fn pkce_challenge_s256(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(digest)
 }
 
-async fn wait_for_oauth_callback(
-    listener: TcpListener,
-    expected_state: String,
-) -> Result<String> {
+async fn wait_for_oauth_callback(listener: TcpListener, expected_state: String) -> Result<String> {
     let (tx, rx) = oneshot::channel::<Result<String>>();
 
     tokio::spawn(async move {
@@ -164,7 +168,9 @@ async fn wait_for_oauth_callback(
                         }
 
                         if state.as_deref() != Some(&expected_state) {
-                            html = Some(error_html("State mismatch. You can close this window and retry."));
+                            html = Some(error_html(
+                                "State mismatch. You can close this window and retry.",
+                            ));
                         } else if let Some(code) = code {
                             send_ok = Some(code);
                             html = Some(success_html());
@@ -263,8 +269,8 @@ pub async fn login_oauth_pkce(
     let verifier = pkce_verifier();
     let challenge = pkce_challenge_s256(&verifier);
 
-    let mut auth_url = Url::parse(&meta.authorization_endpoint)
-        .context("parse authorization_endpoint")?;
+    let mut auth_url =
+        Url::parse(&meta.authorization_endpoint).context("parse authorization_endpoint")?;
     {
         let mut q = auth_url.query_pairs_mut();
         q.append_pair("response_type", "code");
@@ -307,7 +313,11 @@ pub async fn login_oauth_pkce(
     let res = client
         .post(&meta.token_endpoint)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(url::form_urlencoded::Serializer::new(String::new()).extend_pairs(form).finish())
+        .body(
+            url::form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(form)
+                .finish(),
+        )
         .send()
         .await
         .context("exchange oauth code for token")?;

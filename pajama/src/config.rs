@@ -43,7 +43,8 @@ pub fn load_config() -> Result<Config> {
         return Ok(Config::default());
     }
 
-    let text = fs::read_to_string(&path).with_context(|| format!("read config {}", path.display()))?;
+    let text =
+        fs::read_to_string(&path).with_context(|| format!("read config {}", path.display()))?;
     let mut cfg: Config = serde_json::from_str(&text).context("parse config json")?;
     if cfg.api_base_url.trim().is_empty() {
         cfg.api_base_url = default_api_base_url();
@@ -58,6 +59,7 @@ pub fn save_config(cfg: &Config) -> Result<()> {
             .with_context(|| format!("create config dir {}", parent.display()))?;
     }
     let text = serde_json::to_string_pretty(cfg).context("serialize config json")?;
-    fs::write(&path, format!("{text}\n")).with_context(|| format!("write config {}", path.display()))?;
+    fs::write(&path, format!("{text}\n"))
+        .with_context(|| format!("write config {}", path.display()))?;
     Ok(())
 }

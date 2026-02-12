@@ -67,8 +67,8 @@ $shaKey = "$key.sha256"
 
 Write-Host "[release] Uploading to R2: $Bucket/$key"
 Push-Location (Join-Path $root "api")
-npx wrangler r2 object put "$Bucket/$key" --file "$srcExe" --content-type "application/octet-stream" --content-disposition "attachment; filename=\"$fileName\""
-npx wrangler r2 object put "$Bucket/$shaKey" --file "$shaTmp" --content-type "text/plain; charset=utf-8" --cache-control "public, max-age=31536000, immutable"
+npx wrangler r2 object put "$Bucket/$key" --remote --file "$srcExe" --content-type "application/octet-stream" --content-disposition "attachment; filename=\"$fileName\""
+npx wrangler r2 object put "$Bucket/$shaKey" --remote --file "$shaTmp" --content-type "text/plain; charset=utf-8" --cache-control "public, max-age=31536000, immutable"
 Pop-Location
 
 Write-Host "[release] Done."

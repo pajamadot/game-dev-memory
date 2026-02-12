@@ -6,6 +6,7 @@ import { createMemory, listMemories, type MemorySearchMode } from "../core/memor
 import { anthropicMessages } from "../agent/anthropic";
 import { retrievePageIndexEvidence, type PageIndexEvidence } from "../agent/pageindex";
 import { heuristicRetrievalPlan, llmRetrievalPlan, type RetrievalPlan } from "../agent/retrievalPlanner";
+import { getLatestArenaRecommendation, type ArenaRecommendation } from "../evolve/arenaPolicy";
 
 function clampInt(v: unknown, fallback: number, min: number, max: number): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v) : NaN;
@@ -21,6 +22,29 @@ function normalizeMemoryMode(v: unknown): MemorySearchMode {
   const s = asString(v).trim().toLowerCase();
   if (s === "fast" || s === "deep") return s;
   return "balanced";
+}
+
+function isAutoMemoryMode(v: unknown): boolean {
+  const s = asString(v).trim().toLowerCase();
+  return !s || s === "auto" || s === "arena";
+}
+
+function applyArenaRecommendationToPlan(
+  rec: ArenaRecommendation,
+  opts: { allowDocuments: boolean }
+): RetrievalPlan {
+  if (rec.retrieval_mode === "hybrid" && opts.allowDocuments) {
+    return {
+      mode: "manual",
+      strategies: ["memories_fts", "pageindex_artifacts"],
+      reason: `Arena-selected policy (${rec.arm_id}): hybrid retrieval.`,
+    };
+  }
+  return {
+    mode: "manual",
+    strategies: ["memories_fts"],
+    reason: `Arena-selected policy (${rec.arm_id}): memories-first retrieval.`,
+  };
 }
 
 function normalizeTags(v: unknown): string[] {
@@ -156,7 +180,9 @@ agentRouter.post("/ask", async (c) => {
   const includeAssets = Boolean(body.include_assets ?? true);
   const includeDocuments = Boolean(body.include_documents ?? body.include_docs ?? true);
   const documentLimit = clampInt(body.document_limit, 8, 0, 50);
-  const memoryMode = normalizeMemoryMode(body.memory_mode ?? body.memoryMode ?? body.search_mode ?? body.searchMode);
+  const memoryModeRaw = body.memory_mode ?? body.memoryMode ?? body.search_mode ?? body.searchMode;
+  const autoMemoryMode = isAutoMemoryMode(memoryModeRaw);
+  const requestedMemoryMode = normalizeMemoryMode(memoryModeRaw);
   const retrievalMode = asString(body.retrieval_mode || body.retrievalMode || body.mode).trim().toLowerCase() || "auto";
 
   const dryRun = Boolean(body.dry_run ?? false);
@@ -178,16 +204,34 @@ agentRouter.post("/ask", async (c) => {
     retrieval_plan = await llmRetrievalPlan(c.env as any, query, { allowDocuments });
   }
 
-  const useMemorySearch = retrieval_plan.strategies.includes("memories_fts");
+  const { memories, assetsByMemoryId, documents, resolvedMemoryMode, resolvedRetrievalPlan, arenaRecommendation } = await withDbClient(
+    c.env,
+    async (db) => {
+      let resolvedMemoryMode: MemorySearchMode = requestedMemoryMode;
+      let resolvedRetrievalPlan: RetrievalPlan = retrieval_plan;
+      let arenaRecommendation: ArenaRecommendation | null = null;
 
-  const { memories, assetsByMemoryId, documents } = await withDbClient(c.env, async (db) => {
+      if (projectId && (autoMemoryMode || retrievalMode === "auto")) {
+        arenaRecommendation = await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId });
+        if (arenaRecommendation) {
+          if (autoMemoryMode) {
+            resolvedMemoryMode = arenaRecommendation.memory_mode;
+          }
+          if (retrievalMode === "auto") {
+            resolvedRetrievalPlan = applyArenaRecommendationToPlan(arenaRecommendation, { allowDocuments });
+          }
+        }
+      }
+
+      const useMemorySearch = resolvedRetrievalPlan.strategies.includes("memories_fts");
+
     const memRows = useMemorySearch
       ? await listMemories(db, tenantType, tenantId, {
           projectId,
           search: query,
           limit,
           mode: "retrieval",
-          memoryMode,
+          memoryMode: resolvedMemoryMode,
           excludeCategoryPrefixes: ["agent_"],
         })
       : [];
@@ -236,7 +280,7 @@ agentRouter.post("/ask", async (c) => {
     }
 
     let documents: DocumentEvidence[] = [];
-    if (projectId && includeDocuments && documentLimit > 0 && retrieval_plan.strategies.includes("pageindex_artifacts")) {
+    if (projectId && includeDocuments && documentLimit > 0 && resolvedRetrievalPlan.strategies.includes("pageindex_artifacts")) {
       documents = await retrievePageIndexEvidence(db, tenantType, tenantId, {
         projectId,
         query,
@@ -244,8 +288,12 @@ agentRouter.post("/ask", async (c) => {
       });
     }
 
-    return { memories: memRows, assetsByMemoryId, documents };
-  });
+      return { memories: memRows, assetsByMemoryId, documents, resolvedMemoryMode, resolvedRetrievalPlan, arenaRecommendation };
+    }
+  );
+
+  const memoryMode = resolvedMemoryMode;
+  retrieval_plan = resolvedRetrievalPlan;
 
   const retrieved = memories.map(summarizeMemory);
   const assets_index: Record<string, AssetSummary[]> = {};
@@ -346,6 +394,7 @@ agentRouter.post("/ask", async (c) => {
     query,
     project_id: projectId,
     memory_mode: memoryMode,
+    arena_recommendation: arenaRecommendation,
     provider,
     retrieval_plan,
     retrieved: { memories: retrieved, assets_index, documents: retrievedDocs },
@@ -542,7 +591,9 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
   const historyLimit = clampInt(body.history_limit, 20, 0, 200);
   const evidenceLimit = clampInt(body.evidence_limit ?? body.limit, 12, 1, 50);
   const documentLimit = clampInt(body.document_limit, 8, 0, 50);
-  const memoryMode = normalizeMemoryMode(body.memory_mode ?? body.memoryMode ?? body.search_mode ?? body.searchMode);
+  const memoryModeRaw = body.memory_mode ?? body.memoryMode ?? body.search_mode ?? body.searchMode;
+  const autoMemoryMode = isAutoMemoryMode(memoryModeRaw);
+  const requestedMemoryMode = normalizeMemoryMode(memoryModeRaw);
   const retrievalMode = asString(body.retrieval_mode || body.retrievalMode || body.mode).trim().toLowerCase() || "auto";
 
   const now = new Date().toISOString();
@@ -565,9 +616,16 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     retrieval_plan = await llmRetrievalPlan(c.env as any, message, { allowDocuments });
   }
 
-  const useMemorySearch = retrieval_plan.strategies.includes("memories_fts");
-
-  const { projectId, history, retrieved, assets_index, documents } = await withDbClient(c.env, async (db) => {
+  const {
+    projectId,
+    history,
+    retrieved,
+    assets_index,
+    documents,
+    resolvedMemoryMode,
+    resolvedRetrievalPlan,
+    arenaRecommendation,
+  } = await withDbClient(c.env, async (db) => {
     const sRes = await db.query(
       "SELECT id, project_id FROM sessions WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3 AND kind = 'agent'",
       [sessionId, tenantType, tenantId]
@@ -619,6 +677,24 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
         content: String(r.content || ""),
       }));
 
+    let resolvedMemoryMode: MemorySearchMode = requestedMemoryMode;
+    let resolvedRetrievalPlan: RetrievalPlan = retrieval_plan;
+    let arenaRecommendation: ArenaRecommendation | null = null;
+
+    if (autoMemoryMode || retrievalMode === "auto") {
+      arenaRecommendation = await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId });
+      if (arenaRecommendation) {
+        if (autoMemoryMode) {
+          resolvedMemoryMode = arenaRecommendation.memory_mode;
+        }
+        if (retrievalMode === "auto") {
+          resolvedRetrievalPlan = applyArenaRecommendationToPlan(arenaRecommendation, { allowDocuments });
+        }
+      }
+    }
+
+    const useMemorySearch = resolvedRetrievalPlan.strategies.includes("memories_fts");
+
     // Evidence retrieval: search project memory using the new message.
     const memRows = useMemorySearch
       ? await listMemories(db, tenantType, tenantId, {
@@ -626,7 +702,7 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
           search: message,
           limit: 50,
           mode: "retrieval",
-          memoryMode,
+          memoryMode: resolvedMemoryMode,
           excludeCategoryPrefixes: ["agent_"],
         })
       : [];
@@ -684,7 +760,7 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     }
 
     let documents: DocumentEvidence[] = [];
-    if (includeDocuments && documentLimit > 0 && retrieval_plan.strategies.includes("pageindex_artifacts")) {
+    if (includeDocuments && documentLimit > 0 && resolvedRetrievalPlan.strategies.includes("pageindex_artifacts")) {
       documents = await retrievePageIndexEvidence(db, tenantType, tenantId, {
         projectId,
         query: message,
@@ -692,8 +768,20 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
       });
     }
 
-    return { projectId, history, retrieved: evidenceSummaries, assets_index, documents };
+    return {
+      projectId,
+      history,
+      retrieved: evidenceSummaries,
+      assets_index,
+      documents,
+      resolvedMemoryMode,
+      resolvedRetrievalPlan,
+      arenaRecommendation,
+    };
   });
+
+  const memoryMode = resolvedMemoryMode;
+  retrieval_plan = resolvedRetrievalPlan;
 
   let answer: string | null = null;
   let provider: { kind: "none" | "anthropic"; model?: string } = { kind: "none" };
@@ -808,6 +896,7 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     session_id: sessionId,
     project_id: projectId,
     memory_mode: memoryMode,
+    arena_recommendation: arenaRecommendation,
     provider,
     retrieval_plan,
     user_message_id: userMessageId,

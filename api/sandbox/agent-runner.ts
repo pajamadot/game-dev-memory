@@ -48,7 +48,7 @@ type AskResponse = {
   ok: boolean;
   query: string;
   project_id: string | null;
-  memory_mode?: "fast" | "balanced" | "deep";
+  memory_mode?: "auto" | "fast" | "balanced" | "deep";
   provider?: { kind: "none" | "anthropic"; model?: string };
   retrieved: { memories: RetrievedMemory[]; assets_index: Record<string, RetrievedAsset[]>; documents?: RetrievedDocument[] };
   answer: string | null;
@@ -86,10 +86,10 @@ function truthy(v: string | undefined | null): boolean {
   return s === "1" || s === "true" || s === "yes" || s === "on";
 }
 
-function normalizeMemoryMode(v: string | undefined | null): "fast" | "balanced" | "deep" {
+function normalizeMemoryMode(v: string | undefined | null): "auto" | "fast" | "balanced" | "deep" {
   const s = String(v ?? "").trim().toLowerCase();
-  if (s === "fast" || s === "deep") return s;
-  return "balanced";
+  if (s === "fast" || s === "balanced" || s === "deep") return s;
+  return "auto";
 }
 
 function clampInt(v: string | undefined | null, fallback: number, min: number, max: number): number {
@@ -409,8 +409,8 @@ async function main(): Promise<void> {
             },
             memory_mode: {
               type: "string",
-              enum: ["fast", "balanced", "deep"],
-              description: "Memory retrieval profile: fast (lowest latency), balanced (default), deep (higher recall).",
+              enum: ["auto", "fast", "balanced", "deep"],
+              description: "Memory retrieval profile. auto uses arena winner; fast lowers latency; deep increases recall.",
             },
           },
           required: ["query"],

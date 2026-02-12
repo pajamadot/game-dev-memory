@@ -2,7 +2,7 @@ mod api;
 mod config;
 mod oauth;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -13,7 +13,11 @@ use crate::config::{load_config, save_config};
 use crate::oauth::{discover_oauth, login_oauth_pkce};
 
 #[derive(Parser)]
-#[command(name = "pajama", version, about = "PajamaDot CLI for Game Dev Memory (API + OAuth login)")]
+#[command(
+    name = "pajama",
+    version,
+    about = "PajamaDot CLI for Game Dev Memory (API + OAuth login)"
+)]
 struct Cli {
     /// Memory API base URL (defaults to config or PAJAMA_API_URL)
     #[arg(long, global = true)]
@@ -62,6 +66,11 @@ enum Commands {
     Assets {
         #[command(subcommand)]
         cmd: AssetsCmd,
+    },
+
+    Evolve {
+        #[command(subcommand)]
+        cmd: EvolveCmd,
     },
 }
 
@@ -205,6 +214,81 @@ enum AssetsCmd {
 
         #[arg(long)]
         out: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvolveCmd {
+    /// Show the latest arena winner/policy snapshot.
+    ArenaLatest {
+        #[arg(long)]
+        project_id: Option<String>,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run one arena evaluation pass.
+    ArenaRun {
+        #[arg(long)]
+        project_id: Option<String>,
+
+        /// Use only closed sessions (default includes open sessions too)
+        #[arg(long, default_value_t = false)]
+        closed_only: bool,
+
+        #[arg(long, default_value_t = 30)]
+        limit_sessions: u32,
+
+        #[arg(long, default_value_t = 80)]
+        limit_episodes: u32,
+
+        #[arg(long, default_value_t = 16)]
+        memory_limit: u32,
+
+        #[arg(long, default_value_t = 8)]
+        document_limit: u32,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run multiple arena iterations (bounded by time budget).
+    ArenaIterate {
+        #[arg(long)]
+        project_id: Option<String>,
+
+        #[arg(long, default_value_t = 100)]
+        iterations: u32,
+
+        #[arg(long, default_value_t = 120000)]
+        time_budget_ms: u32,
+
+        /// Use only closed sessions (default includes open sessions too)
+        #[arg(long, default_value_t = false)]
+        closed_only: bool,
+
+        /// Continue iterations even if an iteration sees 0 episodes
+        #[arg(long, default_value_t = false)]
+        continue_when_empty: bool,
+
+        #[arg(long, default_value_t = 30)]
+        limit_sessions: u32,
+
+        #[arg(long, default_value_t = 80)]
+        limit_episodes: u32,
+
+        #[arg(long, default_value_t = 16)]
+        memory_limit: u32,
+
+        #[arg(long, default_value_t = 8)]
+        document_limit: u32,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -394,6 +478,10 @@ async fn main() -> Result<()> {
             let api = authed_api(token.as_deref(), &cfg)?;
             handle_assets(api, cmd).await?;
         }
+        Commands::Evolve { cmd } => {
+            let api = authed_api(token.as_deref(), &cfg)?;
+            handle_evolve(api, cmd).await?;
+        }
         Commands::ConfigPath => unreachable!("handled above"),
     }
 
@@ -416,7 +504,9 @@ fn resolve_token(token_override: Option<&str>, cfg: &config::Config) -> Result<S
     cfg.access_token
         .clone()
         .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| anyhow!("missing access token; run `pajama login` (or pass --token / set PAJAMA_TOKEN)"))
+        .ok_or_else(|| {
+            anyhow!("missing access token; run `pajama login` (or pass --token / set PAJAMA_TOKEN)")
+        })
 }
 
 fn authed_api(token_override: Option<&str>, cfg: &config::Config) -> Result<ApiClient> {
@@ -496,7 +586,12 @@ async fn handle_memories(api: ApiClient, cmd: MemoriesCmd) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&res)?);
                 return Ok(());
             }
-            println!("{}\n{}\n\n{}", res.title, format!("[{}] conf={:.2}", res.category, res.confidence), res.content);
+            println!(
+                "{}\n{}\n\n{}",
+                res.title,
+                format!("[{}] conf={:.2}", res.category, res.confidence),
+                res.content
+            );
         }
         MemoriesCmd::Create {
             project_id,
@@ -572,14 +667,18 @@ async fn handle_assets(api: ApiClient, cmd: AssetsCmd) -> Result<()> {
         }
         AssetsCmd::Download { id, out } => {
             let query: Vec<(&str, String)> = vec![];
-            let mut res = api.raw_get(&format!("/api/assets/{id}/object"), &query).await?;
+            let mut res = api
+                .raw_get(&format!("/api/assets/{id}/object"), &query)
+                .await?;
             let status = res.status();
             if !status.is_success() {
                 let text = res.text().await.unwrap_or_default();
                 return Err(anyhow!("download failed (HTTP {status}): {text}"));
             }
 
-            let mut f = tokio::fs::File::create(&out).await.with_context(|| format!("create {}", out.display()))?;
+            let mut f = tokio::fs::File::create(&out)
+                .await
+                .with_context(|| format!("create {}", out.display()))?;
             while let Some(chunk) = res.chunk().await.context("read download chunk")? {
                 tokio::io::AsyncWriteExt::write_all(&mut f, &chunk)
                     .await
@@ -608,7 +707,8 @@ async fn handle_assets(api: ApiClient, cmd: AssetsCmd) -> Result<()> {
                 .and_then(|s| s.to_str())
                 .ok_or_else(|| anyhow!("invalid filename (non-utf8)"))?;
 
-            let content_type = content_type.unwrap_or_else(|| "application/octet-stream".to_string());
+            let content_type =
+                content_type.unwrap_or_else(|| "application/octet-stream".to_string());
             let mut part_size = choose_part_size(byte_size, part_size_mb);
 
             // Ensure we stay <= 10k parts.
@@ -696,6 +796,192 @@ async fn handle_assets(api: ApiClient, cmd: AssetsCmd) -> Result<()> {
     Ok(())
 }
 
+async fn handle_evolve(api: ApiClient, cmd: EvolveCmd) -> Result<()> {
+    match cmd {
+        EvolveCmd::ArenaLatest { project_id, json } => {
+            let mut query: Vec<(&str, String)> = vec![];
+            if let Some(v) = project_id {
+                if !v.trim().is_empty() {
+                    query.push(("project_id", v));
+                }
+            }
+
+            let res: serde_json::Value = api
+                .get_json("/api/evolve/memory-arena/latest", &query)
+                .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let latest = res
+                .get("latest")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            if latest.is_null() {
+                println!("no arena snapshot found");
+                return Ok(());
+            }
+
+            let created_at = latest
+                .get("created_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let arena = latest
+                .get("arena")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let selected_next = arena
+                .get("selected_next")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let winner_current = arena
+                .get("winner_current")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let winner_bandit = arena
+                .get("winner_bandit")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let episodes_total = arena
+                .get("dataset")
+                .and_then(|d| d.get("episodes_total"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+
+            println!("created_at      {}", created_at);
+            println!("selected_next   {}", selected_next);
+            println!("winner_current  {}", winner_current);
+            println!("winner_bandit   {}", winner_bandit);
+            println!("episodes_total  {}", episodes_total);
+        }
+        EvolveCmd::ArenaRun {
+            project_id,
+            closed_only,
+            limit_sessions,
+            limit_episodes,
+            memory_limit,
+            document_limit,
+            json,
+        } => {
+            let payload = serde_json::json!({
+                "project_id": project_id,
+                "include_open_sessions": !closed_only,
+                "limit_sessions": limit_sessions,
+                "limit_episodes": limit_episodes,
+                "memory_limit": memory_limit,
+                "document_limit": document_limit
+            });
+
+            let res: serde_json::Value = api
+                .post_json("/api/evolve/memory-arena/run", &payload)
+                .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let arena = res.get("arena").cloned().unwrap_or(serde_json::Value::Null);
+            let winner_current = arena
+                .get("winner_current")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let selected_next = arena
+                .get("selected_next")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let episodes_total = arena
+                .get("dataset")
+                .and_then(|d| d.get("episodes_total"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let sessions_considered = arena
+                .get("dataset")
+                .and_then(|d| d.get("sessions_considered"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+
+            println!("winner_current      {}", winner_current);
+            println!("selected_next       {}", selected_next);
+            println!("sessions_considered {}", sessions_considered);
+            println!("episodes_total      {}", episodes_total);
+        }
+        EvolveCmd::ArenaIterate {
+            project_id,
+            iterations,
+            time_budget_ms,
+            closed_only,
+            continue_when_empty,
+            limit_sessions,
+            limit_episodes,
+            memory_limit,
+            document_limit,
+            json,
+        } => {
+            let payload = serde_json::json!({
+                "project_id": project_id,
+                "iterations": iterations,
+                "time_budget_ms": time_budget_ms,
+                "include_open_sessions": !closed_only,
+                "stop_when_no_episodes": !continue_when_empty,
+                "limit_sessions": limit_sessions,
+                "limit_episodes": limit_episodes,
+                "memory_limit": memory_limit,
+                "document_limit": document_limit
+            });
+
+            let res: serde_json::Value = api
+                .post_json("/api/evolve/memory-arena/iterate", &payload)
+                .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let batch = res.get("batch").cloned().unwrap_or(serde_json::Value::Null);
+            let requested = batch
+                .get("requested_iterations")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let completed = batch
+                .get("completed_iterations")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let elapsed_ms = batch
+                .get("elapsed_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let stopped = batch
+                .get("stopped_reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+
+            let best_arm = batch
+                .get("average_scores")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let best_arm_id = best_arm
+                .get("arm_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let best_score = best_arm
+                .get("avg_score")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+
+            println!("requested_iterations {}", requested);
+            println!("completed_iterations {}", completed);
+            println!("elapsed_ms           {}", elapsed_ms);
+            println!("stopped_reason       {}", stopped);
+            println!("best_arm             {} ({:.6})", best_arm_id, best_score);
+        }
+    }
+
+    Ok(())
+}
+
 fn parse_tags_csv(s: &str) -> Vec<String> {
     s.split(',')
         .map(|t| t.trim())
@@ -718,7 +1004,9 @@ fn clamp_0_1(v: f64) -> f64 {
 }
 
 fn div_ceil(n: u64, d: u64) -> u64 {
-    if d == 0 { return 0; }
+    if d == 0 {
+        return 0;
+    }
     (n + d - 1) / d
 }
 

@@ -94,6 +94,14 @@ pajama assets upload --project-id <project-uuid> --path "C:\\tmp\\build.zip"
 pajama assets download <asset-uuid> --out "C:\\tmp\\build.zip"
 ```
 
+Evolve (arena):
+
+```powershell
+pajama evolve arena-latest --project-id <project-uuid>
+pajama evolve arena-run --project-id <project-uuid>
+pajama evolve arena-iterate --project-id <project-uuid> --iterations 300 --time-budget-ms 300000
+```
+
 ## Evidence-First: Link Files To Memories
 
 Create a memory first:

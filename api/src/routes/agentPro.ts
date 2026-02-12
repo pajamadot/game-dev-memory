@@ -4,6 +4,7 @@ import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
 import { createMemory } from "../core/memories";
 import { getSandbox, parseSSEStream, type ExecEvent } from "@cloudflare/sandbox";
+import { getLatestArenaRecommendation } from "../evolve/arenaPolicy";
 
 function clampInt(v: unknown, fallback: number, min: number, max: number): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v) : NaN;
@@ -21,6 +22,11 @@ function truthy(v: unknown): boolean {
   if (typeof v === "number") return v !== 0;
   const s = typeof v === "string" ? v.trim().toLowerCase() : "";
   return s === "1" || s === "true" || s === "yes" || s === "on";
+}
+
+function isAutoMemoryMode(v: unknown): boolean {
+  const s = asString(v).trim().toLowerCase();
+  return !s || s === "auto" || s === "arena";
 }
 
 function excerpt(s: string, max: number): string {
@@ -256,12 +262,13 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
   const evidenceLimit = clampInt(body.evidence_limit ?? body.limit, 12, 1, 50);
   const maxTokens = clampInt(body.max_tokens, 900, 128, 2048);
   const memoryModeRaw = asString(body.memory_mode || body.memoryMode || body.search_mode || body.searchMode).trim().toLowerCase();
-  const memoryMode = memoryModeRaw === "fast" || memoryModeRaw === "deep" ? memoryModeRaw : "balanced";
+  const autoMemoryMode = isAutoMemoryMode(memoryModeRaw);
+  const requestedMemoryMode = memoryModeRaw === "fast" || memoryModeRaw === "deep" ? memoryModeRaw : "balanced";
 
   const now = new Date().toISOString();
   const userMessageId = crypto.randomUUID();
 
-  const { projectId, history } = await withDbClient(c.env, async (db) => {
+  const { projectId, history, resolvedMemoryMode, arenaRecommendation } = await withDbClient(c.env, async (db) => {
     const sRes = await db.query(
       "SELECT id, project_id FROM sessions WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3 AND kind = 'agent_pro'",
       [sessionId, tenantType, tenantId]
@@ -313,7 +320,12 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
         content: String(r.content || ""),
       }));
 
-    return { projectId, history };
+    const arenaRecommendation = autoMemoryMode
+      ? await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId })
+      : null;
+    const resolvedMemoryMode = arenaRecommendation?.memory_mode || requestedMemoryMode;
+
+    return { projectId, history, resolvedMemoryMode, arenaRecommendation };
   });
 
   const { readable, writable } = new TransformStream();
@@ -335,7 +347,7 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
         AUTHORIZATION: authorization,
         DRY_RUN: dryRun ? "true" : "false",
         INCLUDE_ASSETS: includeAssets ? "true" : "false",
-        MEMORY_MODE: memoryMode,
+        MEMORY_MODE: resolvedMemoryMode,
         EVIDENCE_LIMIT: String(evidenceLimit),
         MAX_TOKENS: String(maxTokens),
         ANTHROPIC_API_KEY: c.env.ANTHROPIC_API_KEY || "",
@@ -391,7 +403,14 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
       }, HEARTBEAT_MS);
 
       try {
-        await safeSend({ type: "session", sessionId, projectId, user_message_id: userMessageId });
+        await safeSend({
+          type: "session",
+          sessionId,
+          projectId,
+          user_message_id: userMessageId,
+          memory_mode: resolvedMemoryMode,
+          arena_recommendation: arenaRecommendation,
+        });
         await safeSend({ type: "status", sessionId, message: "pro agent started" });
 
         for await (const event of parseSSEStream<ExecEvent>(execStream)) {

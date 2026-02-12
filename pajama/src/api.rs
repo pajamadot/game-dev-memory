@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use reqwest::header;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use url::Url;
 
 #[derive(Clone)]
@@ -16,7 +16,7 @@ impl ApiClient {
         let base = Url::parse(api_base_url)
             .with_context(|| format!("invalid api base url: {api_base_url}"))?;
         let client = reqwest::Client::builder()
-            .user_agent("pajama-cli/0.1.0")
+            .user_agent("pajama-cli/0.1.2")
             .build()
             .context("build http client")?;
 
@@ -29,10 +29,16 @@ impl ApiClient {
 
     fn url(&self, path: &str) -> Result<Url> {
         let path = path.trim_start_matches('/');
-        self.base.join(path).with_context(|| format!("join url path: {path}"))
+        self.base
+            .join(path)
+            .with_context(|| format!("join url path: {path}"))
     }
 
-    pub async fn get_json<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
+    pub async fn get_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<T> {
         let url = self.url(path)?;
         let mut req = self
             .client
@@ -48,7 +54,11 @@ impl ApiClient {
         parse_json_response(res).await
     }
 
-    pub async fn post_json<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
+    pub async fn post_json<T: DeserializeOwned, B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
         let url = self.url(path)?;
         let res = self
             .client
@@ -62,7 +72,12 @@ impl ApiClient {
         parse_json_response(res).await
     }
 
-    pub async fn put_bytes<T: DeserializeOwned>(&self, path: &str, content_type: &str, bytes: Vec<u8>) -> Result<T> {
+    pub async fn put_bytes<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> Result<T> {
         let url = self.url(path)?;
         let res = self
             .client
