@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
-import { createMemory, listMemories } from "../core/memories";
+import { createMemory, listMemories, type MemorySearchMode } from "../core/memories";
 import { anthropicMessages } from "../agent/anthropic";
 import { retrievePageIndexEvidence, type PageIndexEvidence } from "../agent/pageindex";
 import { heuristicRetrievalPlan, llmRetrievalPlan, type RetrievalPlan } from "../agent/retrievalPlanner";
@@ -15,6 +15,12 @@ function clampInt(v: unknown, fallback: number, min: number, max: number): numbe
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v : "";
+}
+
+function normalizeMemoryMode(v: unknown): MemorySearchMode {
+  const s = asString(v).trim().toLowerCase();
+  if (s === "fast" || s === "deep") return s;
+  return "balanced";
 }
 
 function normalizeTags(v: unknown): string[] {
@@ -150,6 +156,7 @@ agentRouter.post("/ask", async (c) => {
   const includeAssets = Boolean(body.include_assets ?? true);
   const includeDocuments = Boolean(body.include_documents ?? body.include_docs ?? true);
   const documentLimit = clampInt(body.document_limit, 8, 0, 50);
+  const memoryMode = normalizeMemoryMode(body.memory_mode ?? body.memoryMode ?? body.search_mode ?? body.searchMode);
   const retrievalMode = asString(body.retrieval_mode || body.retrievalMode || body.mode).trim().toLowerCase() || "auto";
 
   const dryRun = Boolean(body.dry_run ?? false);
@@ -171,14 +178,19 @@ agentRouter.post("/ask", async (c) => {
     retrieval_plan = await llmRetrievalPlan(c.env as any, query, { allowDocuments });
   }
 
+  const useMemorySearch = retrieval_plan.strategies.includes("memories_fts");
+
   const { memories, assetsByMemoryId, documents } = await withDbClient(c.env, async (db) => {
-    const memRows = await listMemories(db, tenantType, tenantId, {
-      projectId,
-      search: query,
-      limit,
-      mode: "retrieval",
-      excludeCategoryPrefixes: ["agent_"],
-    });
+    const memRows = useMemorySearch
+      ? await listMemories(db, tenantType, tenantId, {
+          projectId,
+          search: query,
+          limit,
+          mode: "retrieval",
+          memoryMode,
+          excludeCategoryPrefixes: ["agent_"],
+        })
+      : [];
 
     const memIds = memRows.map((m: any) => String(m.id));
     const assetsByMemoryId = new Map<string, AssetSummary[]>();
@@ -333,6 +345,7 @@ agentRouter.post("/ask", async (c) => {
     ok: true,
     query,
     project_id: projectId,
+    memory_mode: memoryMode,
     provider,
     retrieval_plan,
     retrieved: { memories: retrieved, assets_index, documents: retrievedDocs },
@@ -529,6 +542,7 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
   const historyLimit = clampInt(body.history_limit, 20, 0, 200);
   const evidenceLimit = clampInt(body.evidence_limit ?? body.limit, 12, 1, 50);
   const documentLimit = clampInt(body.document_limit, 8, 0, 50);
+  const memoryMode = normalizeMemoryMode(body.memory_mode ?? body.memoryMode ?? body.search_mode ?? body.searchMode);
   const retrievalMode = asString(body.retrieval_mode || body.retrievalMode || body.mode).trim().toLowerCase() || "auto";
 
   const now = new Date().toISOString();
@@ -550,6 +564,8 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
   } else if (retrievalMode === "llm" && !dryRun && c.env.ANTHROPIC_API_KEY) {
     retrieval_plan = await llmRetrievalPlan(c.env as any, message, { allowDocuments });
   }
+
+  const useMemorySearch = retrieval_plan.strategies.includes("memories_fts");
 
   const { projectId, history, retrieved, assets_index, documents } = await withDbClient(c.env, async (db) => {
     const sRes = await db.query(
@@ -604,13 +620,16 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
       }));
 
     // Evidence retrieval: search project memory using the new message.
-    const memRows = await listMemories(db, tenantType, tenantId, {
-      projectId,
-      search: message,
-      limit: 50,
-      mode: "retrieval",
-      excludeCategoryPrefixes: ["agent_"],
-    });
+    const memRows = useMemorySearch
+      ? await listMemories(db, tenantType, tenantId, {
+          projectId,
+          search: message,
+          limit: 50,
+          mode: "retrieval",
+          memoryMode,
+          excludeCategoryPrefixes: ["agent_"],
+        })
+      : [];
     const evidence = memRows.slice(0, evidenceLimit);
 
     const evidenceSummaries = evidence.map(summarizeMemory);
@@ -788,6 +807,7 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     ok: true,
     session_id: sessionId,
     project_id: projectId,
+    memory_mode: memoryMode,
     provider,
     retrieval_plan,
     user_message_id: userMessageId,

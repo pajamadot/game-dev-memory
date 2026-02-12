@@ -2,7 +2,17 @@ import { Hono } from "hono";
 import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
-import { createMemory, deleteMemory, getMemory, listMemories, setMemoryLifecycle, updateMemory, type MemoryQuality, type MemoryState } from "../core/memories";
+import {
+  createMemory,
+  deleteMemory,
+  getMemory,
+  listMemories,
+  setMemoryLifecycle,
+  updateMemory,
+  type MemoryQuality,
+  type MemorySearchMode,
+  type MemoryState,
+} from "../core/memories";
 
 export const memoriesRouter = new Hono<AppEnv>();
 
@@ -22,6 +32,12 @@ function isMemoryQuality(v: unknown): v is MemoryQuality {
   return v === "unknown" || v === "good" || v === "bad";
 }
 
+function normalizeMemoryMode(v: unknown): MemorySearchMode {
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (s === "fast" || s === "deep") return s;
+  return "balanced";
+}
+
 function safeRelation(v: unknown): string {
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return "related";
@@ -35,6 +51,7 @@ memoriesRouter.get("/", async (c) => {
   const projectId = c.req.query("project_id") || null;
   const category = c.req.query("category") || null;
   const search = c.req.query("q") || null;
+  const memoryMode = normalizeMemoryMode(c.req.query("memory_mode") || c.req.query("search_mode"));
   const tag = c.req.query("tag") || null;
   const sessionId = c.req.query("session_id") || null;
   const includeInactive = truthy(c.req.query("include_inactive") || c.req.query("all_states"));
@@ -49,10 +66,10 @@ memoriesRouter.get("/", async (c) => {
   }
 
   const memories = await withDbClient(c.env, async (db) =>
-    await listMemories(db, tenantType, tenantId, { projectId, category, search, tag, sessionId, states, limit })
+    await listMemories(db, tenantType, tenantId, { projectId, category, search, tag, sessionId, states, memoryMode, limit })
   );
 
-  return c.json({ memories, meta: { total: memories.length } });
+  return c.json({ memories, meta: { total: memories.length, memory_mode: memoryMode } });
 });
 
 // Get single memory

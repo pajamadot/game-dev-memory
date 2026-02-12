@@ -3,6 +3,7 @@ import type { TenantType } from "../tenant";
 
 export type MemoryState = "active" | "superseded" | "quarantined";
 export type MemoryQuality = "unknown" | "good" | "bad";
+export type MemorySearchMode = "fast" | "balanced" | "deep";
 
 async function recordMemoryEvent(
   db: Client,
@@ -46,6 +47,7 @@ export interface ListMemoriesQuery {
   states?: MemoryState[] | null;
   excludeCategoryPrefixes?: string[] | null;
   mode?: "full" | "retrieval";
+  memoryMode?: MemorySearchMode | null;
   limit?: number | null;
 }
 
@@ -59,6 +61,18 @@ function stripScore<T extends Record<string, unknown>>(rows: T[]): T[] {
     delete (out as any)._score;
     return out;
   });
+}
+
+function dedupeById<T extends Record<string, unknown>>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const r of rows) {
+    const id = String((r as any).id || "");
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(r);
+  }
+  return out;
 }
 
 export async function listMemories(
@@ -77,6 +91,7 @@ export async function listMemories(
     ? q.excludeCategoryPrefixes.map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean).slice(0, 16)
     : [];
   const mode = q.mode === "retrieval" ? "retrieval" : "full";
+  const memoryMode: MemorySearchMode = q.memoryMode === "fast" || q.memoryMode === "deep" ? q.memoryMode : "balanced";
   const limit = Math.min(Math.max(q.limit || 50, 1), 200);
   const selectClause =
     mode === "retrieval"
@@ -118,48 +133,48 @@ export async function listMemories(
   }
 
   if (search) {
-    // Two-phase retrieval for performance and relevance:
-    // 1) FTS with rank (uses GIN index)
-    // 2) ILIKE fallback only if needed to fill remaining slots
     const tsq = search.trim();
     const vecExpr = "to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, ''))";
+    const scoreExpr = (tsIdx: number) => `(
+      ts_rank_cd(${vecExpr}, websearch_to_tsquery('simple', $${tsIdx})) * 10.0
+      + (1.0 / (1.0 + (EXTRACT(EPOCH FROM (now() - updated_at)) / 86400.0)))
+      + (confidence * 0.25)
+      + CASE quality WHEN 'good' THEN 0.2 WHEN 'bad' THEN -0.5 ELSE 0.0 END
+    )`;
 
-    try {
+    const runFts = async (ftsLimit: number): Promise<Record<string, unknown>[]> => {
       const ftsParams = [...params];
       ftsParams.push(tsq);
       const tsIdx = ftsParams.length;
-      ftsParams.push(limit);
+      ftsParams.push(ftsLimit);
       const limIdx = ftsParams.length;
 
-      const scoreExpr = `(
-        ts_rank_cd(${vecExpr}, websearch_to_tsquery('simple', $${tsIdx})) * 10.0
-        + (1.0 / (1.0 + (EXTRACT(EPOCH FROM (now() - updated_at)) / 86400.0)))
-        + (confidence * 0.25)
-        + CASE quality WHEN 'good' THEN 0.2 WHEN 'bad' THEN -0.5 ELSE 0.0 END
-      )`;
-
-      const ftsSql = `${selectClause}, ${scoreExpr} AS _score ${where}
+      const ftsSql = `${selectClause}, ${scoreExpr(tsIdx)} AS _score ${where}
         AND ${vecExpr} @@ websearch_to_tsquery('simple', $${tsIdx})
         ORDER BY _score DESC, updated_at DESC
         LIMIT $${limIdx}`;
 
-      const ftsRows = (await db.query(ftsSql, ftsParams)).rows as Record<string, unknown>[];
-      if (ftsRows.length >= limit) return stripScore(ftsRows);
+      return (await db.query(ftsSql, ftsParams)).rows as Record<string, unknown>[];
+    };
 
-      const remaining = limit - ftsRows.length;
+    const runLikeFallback = async (
+      likeLimit: number,
+      excludeIds: string[] = []
+    ): Promise<Record<string, unknown>[]> => {
+      if (likeLimit <= 0) return [];
       const ilike = `%${escapeLike(tsq)}%`;
       const likeParams = [...params];
       likeParams.push(ilike);
       const likeIdx = likeParams.length;
 
       let dedupeClause = "";
-      if (ftsRows.length > 0) {
-        likeParams.push(ftsRows.map((r) => String((r as any).id)));
+      if (excludeIds.length > 0) {
+        likeParams.push(excludeIds);
         const dedupeIdx = likeParams.length;
         dedupeClause = ` AND id <> ALL($${dedupeIdx}::uuid[])`;
       }
 
-      likeParams.push(remaining);
+      likeParams.push(likeLimit);
       const likeLimIdx = likeParams.length;
 
       const likeSql = `${selectClause} ${where}
@@ -168,22 +183,86 @@ export async function listMemories(
         ORDER BY updated_at DESC
         LIMIT $${likeLimIdx}`;
 
-      const likeRows = (await db.query(likeSql, likeParams)).rows as Record<string, unknown>[];
-      return [...stripScore(ftsRows), ...likeRows];
+      return (await db.query(likeSql, likeParams)).rows as Record<string, unknown>[];
+    };
+
+    try {
+      if (memoryMode === "fast") {
+        // Fast mode: one FTS pass only (lower latency and predictable cost).
+        const ftsRows = await runFts(limit);
+        return stripScore(ftsRows);
+      }
+
+      if (memoryMode === "balanced") {
+        // Balanced mode: FTS first, then ILIKE fallback only if needed.
+        const ftsRows = await runFts(limit);
+        if (ftsRows.length >= limit) return stripScore(ftsRows);
+        const likeRows = await runLikeFallback(
+          limit - ftsRows.length,
+          ftsRows.map((r) => String((r as any).id))
+        );
+        return [...stripScore(ftsRows), ...likeRows];
+      }
+
+      // Deep mode:
+      // 1) widen candidate retrieval (higher recall),
+      // 2) blend with contextual neighbors from same session/category,
+      // 3) cap to requested limit.
+      const candidateLimit = Math.min(Math.max(limit * 3, limit), 200);
+      const ftsRows = await runFts(candidateLimit);
+
+      let candidateRows = dedupeById(stripScore(ftsRows));
+      if (candidateRows.length < candidateLimit) {
+        const likeRows = await runLikeFallback(
+          candidateLimit - candidateRows.length,
+          candidateRows.map((r) => String((r as any).id))
+        );
+        candidateRows = dedupeById([...candidateRows, ...likeRows]);
+      }
+
+      const headCount = Math.min(limit, Math.max(1, Math.ceil(limit * 0.6)));
+      const selected = candidateRows.slice(0, headCount);
+      const selectedIds = new Set(selected.map((r) => String((r as any).id || "")).filter(Boolean));
+
+      const remainderNeeded = Math.max(0, limit - selected.length);
+      const canExpandContext = Boolean(projectId && remainderNeeded > 0);
+      const sessionIds = [...new Set(selected.map((r) => String((r as any).session_id || "")).filter(Boolean))].slice(0, 16);
+      const categories = [...new Set(selected.map((r) => String((r as any).category || "")).filter(Boolean))].slice(0, 16);
+
+      const contextualRows: Record<string, unknown>[] = [];
+      if (canExpandContext && (sessionIds.length > 0 || categories.length > 0)) {
+        const neighborParams = [...params];
+        neighborParams.push([...selectedIds]);
+        const excludeIdx = neighborParams.length;
+
+        const clauses: string[] = [];
+        if (sessionIds.length > 0) {
+          neighborParams.push(sessionIds);
+          clauses.push(`session_id = ANY($${neighborParams.length}::uuid[])`);
+        }
+        if (categories.length > 0) {
+          neighborParams.push(categories);
+          clauses.push(`category = ANY($${neighborParams.length}::text[])`);
+        }
+
+        if (clauses.length > 0) {
+          neighborParams.push(Math.min(Math.max(remainderNeeded * 2, remainderNeeded), 80));
+          const limIdx = neighborParams.length;
+          const neighborSql = `${selectClause} ${where}
+            AND id <> ALL($${excludeIdx}::uuid[])
+            AND (${clauses.join(" OR ")})
+            ORDER BY updated_at DESC
+            LIMIT $${limIdx}`;
+          const { rows } = await db.query(neighborSql, neighborParams);
+          contextualRows.push(...(rows as Record<string, unknown>[]));
+        }
+      }
+
+      const merged = dedupeById([...selected, ...contextualRows, ...candidateRows]);
+      return merged.slice(0, limit);
     } catch {
       // Fallback-only path for unusual FTS parse edge cases.
-      const ilike = `%${escapeLike(tsq)}%`;
-      const likeParams = [...params];
-      likeParams.push(ilike);
-      const likeIdx = likeParams.length;
-      likeParams.push(limit);
-      const limIdx = likeParams.length;
-      const likeSql = `${selectClause} ${where}
-        AND (title ILIKE $${likeIdx} ESCAPE '\\\\' OR content ILIKE $${likeIdx} ESCAPE '\\\\')
-        ORDER BY updated_at DESC
-        LIMIT $${limIdx}`;
-      const { rows } = await db.query(likeSql, likeParams);
-      return rows;
+      return await runLikeFallback(limit);
     }
   }
 

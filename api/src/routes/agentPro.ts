@@ -255,6 +255,8 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
   const historyLimit = clampInt(body.history_limit, 20, 0, 200);
   const evidenceLimit = clampInt(body.evidence_limit ?? body.limit, 12, 1, 50);
   const maxTokens = clampInt(body.max_tokens, 900, 128, 2048);
+  const memoryModeRaw = asString(body.memory_mode || body.memoryMode || body.search_mode || body.searchMode).trim().toLowerCase();
+  const memoryMode = memoryModeRaw === "fast" || memoryModeRaw === "deep" ? memoryModeRaw : "balanced";
 
   const now = new Date().toISOString();
   const userMessageId = crypto.randomUUID();
@@ -333,6 +335,7 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
         AUTHORIZATION: authorization,
         DRY_RUN: dryRun ? "true" : "false",
         INCLUDE_ASSETS: includeAssets ? "true" : "false",
+        MEMORY_MODE: memoryMode,
         EVIDENCE_LIMIT: String(evidenceLimit),
         MAX_TOKENS: String(maxTokens),
         ANTHROPIC_API_KEY: c.env.ANTHROPIC_API_KEY || "",

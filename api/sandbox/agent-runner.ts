@@ -48,6 +48,7 @@ type AskResponse = {
   ok: boolean;
   query: string;
   project_id: string | null;
+  memory_mode?: "fast" | "balanced" | "deep";
   provider?: { kind: "none" | "anthropic"; model?: string };
   retrieved: { memories: RetrievedMemory[]; assets_index: Record<string, RetrievedAsset[]>; documents?: RetrievedDocument[] };
   answer: string | null;
@@ -83,6 +84,12 @@ function required(name: string, v: string | undefined | null): string {
 function truthy(v: string | undefined | null): boolean {
   const s = String(v ?? "").trim().toLowerCase();
   return s === "1" || s === "true" || s === "yes" || s === "on";
+}
+
+function normalizeMemoryMode(v: string | undefined | null): "fast" | "balanced" | "deep" {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (s === "fast" || s === "deep") return s;
+  return "balanced";
 }
 
 function clampInt(v: string | undefined | null, fallback: number, min: number, max: number): number {
@@ -343,6 +350,7 @@ async function main(): Promise<void> {
 
   const dryRun = truthy(process.env.DRY_RUN);
   const includeAssets = !truthy(process.env.INCLUDE_ASSETS) ? false : true;
+  const memoryMode = normalizeMemoryMode(process.env.MEMORY_MODE);
   const evidenceLimit = clampInt(process.env.EVIDENCE_LIMIT, 12, 1, 50);
   const maxTokens = clampInt(process.env.MAX_TOKENS, 900, 128, 2048);
 
@@ -356,6 +364,7 @@ async function main(): Promise<void> {
       project_id: projectId,
       include_assets: includeAssets,
       include_documents: true,
+      memory_mode: memoryMode,
       dry_run: true, // retrieval only; synthesis happens here with conversation history
       limit: evidenceLimit,
     }),
@@ -397,6 +406,11 @@ async function main(): Promise<void> {
               type: "string",
               enum: ["auto", "memories", "documents", "hybrid"],
               description: "Retrieval mode hint. Use documents/hybrid when searching manuals/specs/PDF sections.",
+            },
+            memory_mode: {
+              type: "string",
+              enum: ["fast", "balanced", "deep"],
+              description: "Memory retrieval profile: fast (lowest latency), balanced (default), deep (higher recall).",
             },
           },
           required: ["query"],
@@ -592,6 +606,8 @@ async function main(): Promise<void> {
             const docLim = clampInt(String(anyInput.document_limit ?? ""), 8, 0, 50);
             const modeRaw = typeof anyInput.retrieval_mode === "string" ? anyInput.retrieval_mode.trim().toLowerCase() : "";
             const retrieval_mode = modeRaw === "memories" || modeRaw === "documents" || modeRaw === "hybrid" ? modeRaw : "auto";
+            const memModeRaw = typeof anyInput.memory_mode === "string" ? anyInput.memory_mode.trim().toLowerCase() : "";
+            const memory_mode = memModeRaw === "fast" || memModeRaw === "deep" ? memModeRaw : "balanced";
             const cacheKey = JSON.stringify({
               q,
               pid,
@@ -600,6 +616,7 @@ async function main(): Promise<void> {
               incDocs,
               docLim,
               retrieval_mode,
+              memory_mode,
             });
 
             let more = searchEvidenceCache.get(cacheKey);
@@ -613,6 +630,7 @@ async function main(): Promise<void> {
                   include_documents: incDocs,
                   document_limit: docLim,
                   retrieval_mode,
+                  memory_mode,
                   dry_run: true,
                   limit: lim,
                 }),
