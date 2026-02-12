@@ -18,6 +18,25 @@ It also calls out a "gateway + control UI" pattern inspired by Cloudflare's `mol
 6. Treat memory *updates* (edit/merge/delete/forget) as a feature, not an afterthought. This strongly affects agent performance in practice.
 7. Use benchmarks (LongMemEval; LoCoMo) to drive schema and retrieval design, not just model choice.
 
+## 2026 Update: What Changed In The Literature
+
+Recent 2025-2026 papers push a stronger stance: memory quality is mostly a **runtime policy** problem, not only a storage problem.
+
+- Budget-aware routing: choose retrieval complexity per query and budget instead of one fixed pipeline.
+- Hierarchical retrieval: retrieve theme -> episode -> raw evidence to reduce redundant context.
+- Active forgetting: use decay and reinforcement to control memory growth.
+- Memory safety: treat poisoning and self-reinforcing bad memory as first-class threats.
+- Cognitive evaluation: test latent constraints/consistency, not only explicit factual recall.
+
+Representative sources:
+
+- BudgetMem (2026-02-05): https://arxiv.org/abs/2602.06025
+- xMemory (2026-02-02): https://arxiv.org/abs/2602.02007
+- FadeMem (2026-01-26): https://arxiv.org/abs/2601.18642
+- AgeMem (2026-01-05): https://arxiv.org/abs/2601.01885
+- LoCoMo-Plus (2026-02-11): https://arxiv.org/abs/2602.10715
+- A-MemGuard (2025-09-29): https://arxiv.org/abs/2510.02373
+
 ## Memory Taxonomy (What To Store)
 
 ### 1) Working memory (short-term)
@@ -184,13 +203,13 @@ The most important missing piece for "semantic search" is an embeddings index. M
 
 ## Recommended Next Steps
 
-1. Extend retrieval beyond memories: add FTS for chunk text / asset text previews, and keep a stable hybrid ranking (FTS + recency + quality/confidence) with lifecycle filtering.
-2. Add optional embeddings and hybrid retrieval (FTS + vector similarity), with tenant/project filters as hard constraints.
-3. Expand the `/agent` control UI with "Save as memory" (turn answers into durable semantic/procedural memories).
-4. Expand the `/agent` control UI with evidence deep links (memory + asset viewers).
-5. Add an artifact/asset viewer UI for chunked large files (range fetch + chunk text preview).
-6. Grow the evolver beyond summaries: dedupe, confidence calibration, and cross-project bridges within a tenant (org or personal).
-7. Add explicit "supersedes" / "contradicts" linking and a lightweight memory pruning job (policy + audit).
+1. Add retrieval modes to API (`fast`, `balanced`, `deep`) with query-aware routing and explicit cost/latency controls.
+2. Extend retrieval beyond memories: add FTS for chunk text / asset text previews and hierarchical expansion for deep mode.
+3. Add optional embeddings and hybrid retrieval (FTS + vector similarity), with tenant/project filters as hard constraints.
+4. Add memory maintenance metadata (`decay_score`, reinforcement, validation timestamp) and a scheduled compaction/forgetting pass.
+5. Add memory safety controls: quarantine suspicious memories and require multi-evidence checks before promotion.
+6. Expand the `/agent` control UI with "Save as memory" + evidence deep links (memory + asset viewers).
+7. Add a retrieval eval harness that tracks answer quality, citation quality, token cost, and latency over time.
 
 ## References
 
@@ -205,6 +224,12 @@ The most important missing piece for "semantic search" is an embeddings index. M
 - Gao, J. et al. "LongMemEval: Benchmarking LLMs for Long-Term Memory" (2024). arXiv:2410.10813. https://arxiv.org/abs/2410.10813
 - Wang, X. et al. "LoCoMo: Evaluating LLMs on Long-Term Conversation Memory" (2024). arXiv:2402.17753. https://arxiv.org/abs/2402.17753
 - Bond, H. et al. "How Memory Management Impacts LLM Agent Performance" (2025). arXiv:2505.16067. https://arxiv.org/abs/2505.16067
+- Li, Y. et al. "Locomo-Plus: Beyond-Factual Cognitive Memory Evaluation Framework for LLM Agents" (2026). arXiv:2602.10715. https://arxiv.org/abs/2602.10715
+- Zhang, H. et al. "Learning Query-Aware Budget-Tier Routing for Runtime Agent Memory" (2026). arXiv:2602.06025. https://arxiv.org/abs/2602.06025
+- Hu, Z. et al. "Beyond RAG for Agent Memory: Retrieval by Decoupling and Aggregation" (2026). arXiv:2602.02007. https://arxiv.org/abs/2602.02007
+- Wei, L. et al. "FadeMem: Biologically-Inspired Forgetting for Efficient Agent Memory" (2026). arXiv:2601.18642. https://arxiv.org/abs/2601.18642
+- Yu, Y. et al. "Agentic Memory: Learning Unified Long-Term and Short-Term Memory Management for Large Language Model Agents" (2026). arXiv:2601.01885. https://arxiv.org/abs/2601.01885
+- Wei, Q. et al. "A-MemGuard: A Proactive Defense Framework for LLM-Based Agent Memory" (2025). arXiv:2510.02373. https://arxiv.org/abs/2510.02373
 - Cloudflare `moltworker` (OpenClaw on Workers): https://github.com/cloudflare/moltworker
 - LangGraph docs: Memory. https://langchain-ai.github.io/langgraph/concepts/memory/
 - LlamaIndex docs: Agent Memory. https://docs.llamaindex.ai/en/stable/understanding/agent/memory/

@@ -107,3 +107,59 @@ Outputs:
 
 - `research/agent-memory/digests/arxiv-YYYY-MM-DD.md`
 - `research/agent-memory/papers/<arxiv-id>.md`
+
+## Iteration: 2026-02-12 (Synthesis)
+
+Source digest:
+
+- `research/agent-memory/digests/arxiv-2026-02-12.md`
+
+Shortlist reviewed in detail:
+
+- LoCoMo-Plus (2602.10715): cognitive-memory evaluation beyond factual recall.
+- MemAdapter (2602.08369): cross-paradigm memory alignment + retrieval.
+- BudgetMem (2602.06025): query-aware runtime budget routing.
+- xMemory (2602.02007): decoupled hierarchical retrieval for correlated memory streams.
+- FadeMem (2601.18642): active forgetting and storage-efficiency tradeoffs.
+- AgeMem (2601.01885): unified STM/LTM as explicit memory actions.
+- A-MemGuard (2510.02373): proactive memory-poisoning defense.
+- PAMU (2510.09720): preference-aware update policy for evolving user behavior.
+
+### Pattern shifts worth adopting
+
+1. Runtime policy selection is now central.
+   - Retrieval should choose low/mid/high memory strategies per query.
+   - Static top-k retrieval is no longer enough for cost-quality control.
+2. Retrieval should be hierarchical and diverse, not only nearest-neighbor.
+   - Correlated memory streams need theme/episode/message staged retrieval.
+3. Forgetting and memory compression should be explicit and measurable.
+   - Keep a decay + reinforcement policy based on access and usefulness.
+4. Memory security must be built in.
+   - Detect potentially poisoned/contradictory memory and gate promotion.
+5. Evaluation should include latent-constraint consistency.
+   - Do not overfit on factual recall benchmarks alone.
+
+### Concrete implementation deltas for game-dev-memory
+
+1. Add retrieval budgets to the memory API.
+   - Proposed request shape: `mode: "fast" | "balanced" | "deep"`.
+   - `fast`: FTS + strict filters + small context.
+   - `balanced`: current hybrid with recency/confidence weighting.
+   - `deep`: hierarchical expansion (theme -> episode -> evidence chunks).
+2. Add memory maintenance metadata.
+   - Per memory: `decay_score`, `reinforcement_count`, `last_validated_at`.
+   - Scheduled compaction job: summarize/merge low-value duplicates.
+3. Add safety pipeline before promotion.
+   - Quarantine tag for suspicious memories.
+   - Cross-check candidate memory against multiple evidence links.
+4. Add preference-aware updates for personal memory.
+   - Maintain short-term and long-term preference views and fuse during retrieval.
+5. Add evaluation harness for regressions.
+   - Track not only answer quality, but also citation quality, token cost, and latency.
+
+### Next coding iteration candidates
+
+1. Implement query `mode` routing in `api/src/core/memories.ts`.
+2. Introduce basic decay/compaction fields + scheduled maintenance pass.
+3. Add memory quarantine flag and UI indicator for untrusted entries.
+4. Add an `/api/evals/memory` endpoint to run fixed retrieval test cases.
