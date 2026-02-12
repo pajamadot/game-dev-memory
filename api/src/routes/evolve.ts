@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
-import { runMemoryArena } from "../evolve/memoryArena";
+import { runMemoryArena, runMemoryArenaIterations } from "../evolve/memoryArena";
 
 export const evolveRouter = new Hono<AppEnv>();
 
@@ -25,6 +25,14 @@ function parseJsonMaybe(v: unknown): any {
     }
   }
   return null;
+}
+
+function truthy(v: unknown): boolean {
+  if (!v) return false;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  return s === "1" || s === "true" || s === "yes" || s === "on";
 }
 
 // Get evolution history
@@ -181,6 +189,7 @@ evolveRouter.post("/memory-arena/run", async (c) => {
       actorId,
       projectId,
       sessionKinds,
+      includeOpenSessions: !("include_open_sessions" in body) || truthy(body.include_open_sessions),
       limitSessions: clampInt(body.limit_sessions, 30, 1, 200),
       limitEpisodes: clampInt(body.limit_episodes, 80, 1, 400),
       memoryLimit: clampInt(body.memory_limit, 16, 1, 80),
@@ -189,6 +198,37 @@ evolveRouter.post("/memory-arena/run", async (c) => {
   );
 
   return c.json({ ok: true, arena: result });
+});
+
+// Run multiple arena iterations in one call (bounded by time budget).
+evolveRouter.post("/memory-arena/iterate", async (c) => {
+  const { tenantType, tenantId, actorId } = requireTenant(c);
+  const body = await c.req.json().catch(() => ({}));
+
+  const projectId = typeof body.project_id === "string" && body.project_id.trim() ? body.project_id.trim() : null;
+  const sessionKinds = Array.isArray(body.session_kinds)
+    ? body.session_kinds.filter((v: unknown) => v === "agent" || v === "agent_pro")
+    : undefined;
+
+  const batch = await withDbClient(c.env, async (db) =>
+    await runMemoryArenaIterations(db, {
+      tenantType,
+      tenantId,
+      actorId,
+      projectId,
+      sessionKinds,
+      includeOpenSessions: !("include_open_sessions" in body) || truthy(body.include_open_sessions),
+      iterations: clampInt(body.iterations, 10, 1, 1000),
+      timeBudgetMs: clampInt(body.time_budget_ms, 25_000, 1_000, 1_800_000),
+      stopWhenNoEpisodes: !("stop_when_no_episodes" in body) || truthy(body.stop_when_no_episodes),
+      limitSessions: clampInt(body.limit_sessions, 30, 1, 200),
+      limitEpisodes: clampInt(body.limit_episodes, 80, 1, 400),
+      memoryLimit: clampInt(body.memory_limit, 16, 1, 80),
+      documentLimit: clampInt(body.document_limit, 8, 0, 50),
+    })
+  );
+
+  return c.json({ ok: true, batch });
 });
 
 // Get the latest arena result from evolution events.

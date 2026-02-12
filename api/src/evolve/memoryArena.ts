@@ -61,6 +61,7 @@ type ArenaRunInput = {
   actorId: string | null;
   projectId?: string | null;
   sessionKinds?: SessionKind[] | null;
+  includeOpenSessions?: boolean;
   limitSessions?: number;
   limitEpisodes?: number;
   memoryLimit?: number;
@@ -84,6 +85,22 @@ type ArenaRunResult = {
     total_pulls: number;
     arms: BanditArmState[];
   };
+};
+
+type ArenaBatchRunInput = ArenaRunInput & {
+  iterations: number;
+  timeBudgetMs?: number;
+  stopWhenNoEpisodes?: boolean;
+};
+
+type ArenaBatchRunResult = {
+  requested_iterations: number;
+  completed_iterations: number;
+  elapsed_ms: number;
+  stopped_reason: "completed" | "time_budget" | "no_episodes";
+  winner_tally: { arm_id: string; wins: number }[];
+  average_scores: { arm_id: string; avg_score: number }[];
+  last_run: ArenaRunResult | null;
 };
 
 const DEFAULT_ARMS: ArenaArm[] = [
@@ -202,6 +219,7 @@ async function loadDataset(
     tenantId: string;
     projectId: string | null;
     sessionKinds: SessionKind[];
+    includeOpenSessions: boolean;
     limitSessions: number;
     limitEpisodes: number;
   }
@@ -210,8 +228,11 @@ async function loadDataset(
   let sessionsSql = `SELECT id, project_id, kind
     FROM sessions
     WHERE tenant_type = $1 AND tenant_id = $2
-      AND kind = ANY($3::text[])
-      AND ended_at IS NOT NULL`;
+      AND kind = ANY($3::text[])`;
+
+  if (!input.includeOpenSessions) {
+    sessionsSql += " AND ended_at IS NOT NULL";
+  }
 
   if (input.projectId) {
     sessionsParams.push(input.projectId);
@@ -443,6 +464,7 @@ export async function runMemoryArena(db: Client, input: ArenaRunInput): Promise<
   const sessionKinds = (Array.isArray(input.sessionKinds) && input.sessionKinds.length
     ? input.sessionKinds.filter((k): k is SessionKind => k === "agent" || k === "agent_pro")
     : ["agent", "agent_pro"]) as SessionKind[];
+  const includeOpenSessions = input.includeOpenSessions !== false;
 
   const limitSessions = clampInt(input.limitSessions, 30, 1, 200);
   const limitEpisodes = clampInt(input.limitEpisodes, 80, 1, 400);
@@ -454,6 +476,7 @@ export async function runMemoryArena(db: Client, input: ArenaRunInput): Promise<
     tenantId: input.tenantId,
     projectId,
     sessionKinds,
+    includeOpenSessions,
     limitSessions,
     limitEpisodes,
   });
@@ -527,4 +550,74 @@ export async function runMemoryArena(db: Client, input: ArenaRunInput): Promise<
   });
 
   return output;
+}
+
+export async function runMemoryArenaIterations(db: Client, input: ArenaBatchRunInput): Promise<ArenaBatchRunResult> {
+  const requestedIterations = clampInt(input.iterations, 1, 1, 1000);
+  const timeBudgetMs = clampInt(input.timeBudgetMs, 60_000, 1_000, 1_800_000);
+  const stopWhenNoEpisodes = input.stopWhenNoEpisodes !== false;
+
+  const startedAt = Date.now();
+  const winnerCount = new Map<string, number>();
+  const scoreSums = new Map<string, { sum: number; n: number }>();
+
+  let completed = 0;
+  let stoppedReason: "completed" | "time_budget" | "no_episodes" = "completed";
+  let lastRun: ArenaRunResult | null = null;
+
+  for (let i = 0; i < requestedIterations; i++) {
+    if (Date.now() - startedAt >= timeBudgetMs) {
+      stoppedReason = "time_budget";
+      break;
+    }
+
+    const run = await runMemoryArena(db, {
+      tenantType: input.tenantType,
+      tenantId: input.tenantId,
+      actorId: input.actorId,
+      projectId: input.projectId,
+      sessionKinds: input.sessionKinds,
+      includeOpenSessions: input.includeOpenSessions,
+      limitSessions: input.limitSessions,
+      limitEpisodes: input.limitEpisodes,
+      memoryLimit: input.memoryLimit,
+      documentLimit: input.documentLimit,
+    });
+
+    completed++;
+    lastRun = run;
+
+    if (run.winner_current) {
+      winnerCount.set(run.winner_current, (winnerCount.get(run.winner_current) || 0) + 1);
+    }
+    for (const arm of run.arm_results) {
+      const cur = scoreSums.get(arm.arm_id) || { sum: 0, n: 0 };
+      cur.sum += arm.avg_score;
+      cur.n += 1;
+      scoreSums.set(arm.arm_id, cur);
+    }
+
+    if (stopWhenNoEpisodes && run.dataset.episodes_total === 0) {
+      stoppedReason = "no_episodes";
+      break;
+    }
+  }
+
+  const winner_tally = [...winnerCount.entries()]
+    .map(([arm_id, wins]) => ({ arm_id, wins }))
+    .sort((a, b) => b.wins - a.wins);
+
+  const average_scores = [...scoreSums.entries()]
+    .map(([arm_id, v]) => ({ arm_id, avg_score: v.n > 0 ? v.sum / v.n : 0 }))
+    .sort((a, b) => b.avg_score - a.avg_score);
+
+  return {
+    requested_iterations: requestedIterations,
+    completed_iterations: completed,
+    elapsed_ms: Date.now() - startedAt,
+    stopped_reason: stoppedReason,
+    winner_tally,
+    average_scores,
+    last_run: lastRun,
+  };
 }

@@ -178,7 +178,7 @@ export async function listMemories(
       const likeLimIdx = likeParams.length;
 
       const likeSql = `${selectClause} ${where}
-        AND (title ILIKE $${likeIdx} ESCAPE '\\\\' OR content ILIKE $${likeIdx} ESCAPE '\\\\')
+        AND (title ILIKE $${likeIdx} OR content ILIKE $${likeIdx})
         ${dedupeClause}
         ORDER BY updated_at DESC
         LIMIT $${likeLimIdx}`;

@@ -188,5 +188,6 @@ We now have a first evolution loop that compares retrieval organizations using r
 
 - `POST /api/evolve/memory-arena/run`
 - `GET /api/evolve/memory-arena/latest`
+- `POST /api/evolve/memory-arena/iterate` (batch loop with time budget)
 
 This gives us a practical "test and win" loop grounded in actual project interactions rather than synthetic prompts.
