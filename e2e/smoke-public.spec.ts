@@ -30,6 +30,11 @@ test.describe("Public UX smoke", () => {
 
     await page.goto("/research/pageindex");
     await expect(page.getByRole("heading", { name: "PageIndex", exact: true })).toBeVisible();
+
+    await page.goto("/research/new-projects");
+    await expect(
+      page.getByRole("heading", { name: "New Projects Radar", exact: true })
+    ).toBeVisible();
   });
 
   test("agent page (logged out) renders", async ({ page }) => {

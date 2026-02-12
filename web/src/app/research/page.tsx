@@ -46,6 +46,16 @@ export default function ResearchIndexPage() {
             <p className="text-sm font-semibold text-zinc-950">PageIndex</p>
             <p className="mt-1 text-sm text-zinc-600">Document indexing for long specs/manuals (TOC-like tree + section retrieval).</p>
           </Link>
+
+          <Link
+            href="/research/new-projects"
+            className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur hover:bg-white"
+          >
+            <p className="text-sm font-semibold text-zinc-950">New Projects Radar</p>
+            <p className="mt-1 text-sm text-zinc-600">
+              Daily discovery loop for new tools/projects, automatically converted into org/person memory.
+            </p>
+          </Link>
         </main>
       </div>
     </div>

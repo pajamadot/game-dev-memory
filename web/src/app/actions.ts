@@ -106,3 +106,13 @@ export async function runAgentMemoryDigest(_formData: FormData) {
 
   revalidatePath("/research/agent-memory");
 }
+
+export async function runNewProjectsDigest(_formData: FormData) {
+  await apiJson("/api/research/new-projects/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+
+  revalidatePath("/research/new-projects");
+}

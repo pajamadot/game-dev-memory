@@ -22,6 +22,7 @@ import { oauthRouter } from "./routes/oauth";
 import { TenantError } from "./tenant";
 import { runUnrealAgentsDailyDigestForAllTenants } from "./research/unrealAgents";
 import { runAgentMemoryDailyDigestForAllTenants } from "./research/agentMemory";
+import { runNewProjectsDailyDigestForAllTenants } from "./research/newProjects";
 import { getOAuthMetadata, getProtectedResourceMetadata, handleAuthorize, handleRegister, handleToken } from "./oauth/server";
 import { handleMcpJsonRpc, MCP_ERROR_CODES, type McpRequest, type McpResponse } from "./mcp/server";
 
@@ -185,6 +186,13 @@ export default {
                 await runAgentMemoryDailyDigestForAllTenants(env, when);
               } catch (err) {
                 console.error("[cron] agent-memory digest failed:", err);
+              }
+            })(),
+            (async () => {
+              try {
+                await runNewProjectsDailyDigestForAllTenants(env, when);
+              } catch (err) {
+                console.error("[cron] new-projects digest failed:", err);
               }
             })(),
           ]);
