@@ -2,8 +2,30 @@ import { Hono } from "hono";
 import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
+import { runMemoryArena } from "../evolve/memoryArena";
 
 export const evolveRouter = new Hono<AppEnv>();
+
+function clampInt(v: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function parseJsonMaybe(v: unknown): any {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "object") return v;
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s) return null;
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 // Get evolution history
 evolveRouter.get("/events", async (c) => {
@@ -139,5 +161,67 @@ evolveRouter.get("/signals", async (c) => {
     stale_memories: staleMemories ?? 0,
     sessions: sessionStats,
     timestamp: new Date().toISOString(),
+  });
+});
+
+// Run retrieval-evolution arena over past agent sessions and select a winner.
+evolveRouter.post("/memory-arena/run", async (c) => {
+  const { tenantType, tenantId, actorId } = requireTenant(c);
+  const body = await c.req.json().catch(() => ({}));
+
+  const projectId = typeof body.project_id === "string" && body.project_id.trim() ? body.project_id.trim() : null;
+  const sessionKinds = Array.isArray(body.session_kinds)
+    ? body.session_kinds.filter((v: unknown) => v === "agent" || v === "agent_pro")
+    : undefined;
+
+  const result = await withDbClient(c.env, async (db) =>
+    await runMemoryArena(db, {
+      tenantType,
+      tenantId,
+      actorId,
+      projectId,
+      sessionKinds,
+      limitSessions: clampInt(body.limit_sessions, 30, 1, 200),
+      limitEpisodes: clampInt(body.limit_episodes, 80, 1, 400),
+      memoryLimit: clampInt(body.memory_limit, 16, 1, 80),
+      documentLimit: clampInt(body.document_limit, 8, 0, 50),
+    })
+  );
+
+  return c.json({ ok: true, arena: result });
+});
+
+// Get the latest arena result from evolution events.
+evolveRouter.get("/memory-arena/latest", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const projectId = c.req.query("project_id") || null;
+
+  const latest = await withDbClient(c.env, async (db) => {
+    const params: unknown[] = [tenantType, tenantId];
+    let q = `SELECT id, project_id, created_at, created_by, changes
+      FROM evolution_events
+      WHERE tenant_type = $1 AND tenant_id = $2
+        AND type = 'optimize'
+        AND description = 'memory_arena_run'`;
+    if (projectId) {
+      params.push(projectId);
+      q += ` AND project_id = $${params.length}`;
+    }
+    q += ` ORDER BY created_at DESC LIMIT 1`;
+    const { rows } = await db.query(q, params);
+    return rows[0] || null;
+  });
+
+  if (!latest) return c.json({ ok: true, latest: null });
+  const changes = parseJsonMaybe((latest as any).changes) || {};
+  return c.json({
+    ok: true,
+    latest: {
+      id: String((latest as any).id),
+      project_id: (latest as any).project_id ? String((latest as any).project_id) : null,
+      created_at: String((latest as any).created_at),
+      created_by: (latest as any).created_by ? String((latest as any).created_by) : null,
+      arena: changes.arena ?? null,
+    },
   });
 });

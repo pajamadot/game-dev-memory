@@ -163,3 +163,30 @@ Shortlist reviewed in detail:
 2. Introduce basic decay/compaction fields + scheduled maintenance pass.
 3. Add memory quarantine flag and UI indicator for untrusted entries.
 4. Add an `/api/evals/memory` endpoint to run fixed retrieval test cases.
+
+## Implemented: Session-Driven Memory Arena (RL-style selection)
+
+We now have a first evolution loop that compares retrieval organizations using real agent-session traces.
+
+### What it does
+
+1. Replays prompts from completed `agent` / `agent_pro` sessions.
+2. Uses the next assistant message evidence links as weak supervision labels.
+3. Evaluates multiple retrieval arms:
+   - `fast_memories`
+   - `balanced_memories`
+   - `deep_memories`
+   - `balanced_hybrid`
+   - `deep_hybrid`
+4. Scores each arm on:
+   - evidence recall/precision (memory + doc),
+   - latency,
+   - category diversity.
+5. Writes results to `evolution_events` and maintains a UCB-style bandit recommendation.
+
+### API endpoints
+
+- `POST /api/evolve/memory-arena/run`
+- `GET /api/evolve/memory-arena/latest`
+
+This gives us a practical "test and win" loop grounded in actual project interactions rather than synthetic prompts.

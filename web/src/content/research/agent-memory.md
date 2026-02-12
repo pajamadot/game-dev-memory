@@ -211,6 +211,23 @@ The most important missing piece for "semantic search" is an embeddings index. M
 6. Expand the `/agent` control UI with "Save as memory" + evidence deep links (memory + asset viewers).
 7. Add a retrieval eval harness that tracks answer quality, citation quality, token cost, and latency over time.
 
+## Implemented Evolution Loop: Session-Driven Memory Arena
+
+The API now includes a first RL-style evolution harness to compare retrieval organizations using real agent sessions.
+
+- Endpoint: `POST /api/evolve/memory-arena/run`
+- Snapshot: `GET /api/evolve/memory-arena/latest`
+
+How it works:
+
+1. Replays user prompts from completed agent sessions (`agent` and `agent_pro`).
+2. Uses evidence references from the next assistant message as weak labels.
+3. Evaluates multiple retrieval arms (`fast/balanced/deep` with memories/hybrid).
+4. Scores arms by recall/precision, latency, and evidence diversity.
+5. Stores the run in `evolution_events` and computes a UCB-style next arm recommendation.
+
+This turns retrieval tuning into a continuous data-driven process.
+
 ## References
 
 - Park, J. S. et al. "Generative Agents: Interactive Simulacra of Human Behavior" (2023). arXiv:2304.03442. https://arxiv.org/abs/2304.03442
