@@ -461,7 +461,7 @@ agentProRouter.post("/sessions/:id/continue", async (c) => {
         const errorMessage = output?.error ? String(output.error) : !success ? "Sandbox run failed" : null;
 
         let assistantMessageId: string | null = null;
-        if (answer) {
+        if (success && answer) {
           const evidence_memory_ids = Array.isArray(retrieved?.memories) ? retrieved.memories.map((m: any) => String(m.id)) : [];
           const evidence_asset_ids: string[] = [];
           const idx = (retrieved?.assets_index || {}) as Record<string, any[]>;

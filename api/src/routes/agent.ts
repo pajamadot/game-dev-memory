@@ -785,8 +785,10 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
 
   let answer: string | null = null;
   let provider: { kind: "none" | "anthropic"; model?: string } = { kind: "none" };
+  const notes: string[] = [];
+  const llmConfigured = Boolean(c.env.ANTHROPIC_API_KEY && String(c.env.ANTHROPIC_API_KEY).trim());
 
-  if (!dryRun && c.env.ANTHROPIC_API_KEY) {
+  if (!dryRun && llmConfigured) {
     const system = [
       "You are PajamaDot Project Memory Agent.",
       "You are chatting with a user about a game-dev project.",
@@ -838,18 +840,39 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
       { role: "user" as const, content: `Question:\n${message}\n\nEvidence:\n${ctx}\n` },
     ];
 
-    const res = await anthropicMessages(c.env, {
-      system,
-      maxTokens: clampInt(body.max_tokens, 800, 128, 2048),
-      messages,
-    });
+    try {
+      const res = await anthropicMessages(c.env, {
+        system,
+        maxTokens: clampInt(body.max_tokens, 800, 128, 2048),
+        messages,
+      });
 
-    answer = res.text || null;
-    provider = { kind: "anthropic", model: res.model };
+      answer = res.text || null;
+      provider = { kind: "anthropic", model: res.model };
+      if (!answer) {
+        notes.push(`LLM returned empty response (stop_reason=${res.stopReason ?? "unknown"}).`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      notes.push(`LLM synthesis failed: ${msg}`);
+    }
+  }
+
+  if (!answer) {
+    const fb = fallbackSynthesis({
+      query: message,
+      projectId,
+      dryRun,
+      llmConfigured,
+      memoryCount: retrieved.length,
+      docCount: (documents || []).length,
+    });
+    answer = fb.answer;
+    notes.push(...fb.notes);
   }
 
   let assistantMessageId: string | null = null;
-  if (answer) {
+  if (answer && !dryRun) {
     const evidence_memory_ids = retrieved.map((m) => m.id);
     const evidence_asset_ids: string[] = [];
     for (const assets of Object.values(assets_index || {})) {
@@ -903,10 +926,7 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     assistant_message_id: assistantMessageId,
     retrieved: { memories: retrieved, assets_index, documents: documents || [] },
     answer,
-    notes:
-      provider.kind === "none"
-        ? ["LLM is not configured (or dry_run=true). Returning retrieval results only."]
-        : [],
+    notes,
   });
 });
 

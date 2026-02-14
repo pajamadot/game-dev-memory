@@ -185,3 +185,15 @@ $body = @{
 
 Invoke-RestMethod "$api/api/evolve/memory-arena/campaign" -Method Post -Headers $h -ContentType "application/json" -Body $body
 ```
+
+## Agent Endpoints
+
+- `GET /api/agent/status`
+- `POST /api/agent/ask`
+- `POST /api/agent/sessions/:id/continue`
+- `POST /api/agent-pro/sessions/:id/continue` (SSE streaming)
+
+Notes:
+
+- Agent routes are retrieval-first and now include deterministic fallback synthesis when LLM output is unavailable, so callers receive a usable `answer` payload.
+- `dry_run=true` keeps retrieval-only semantics and does not persist assistant messages.

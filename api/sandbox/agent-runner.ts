@@ -272,6 +272,47 @@ function buildEvidenceContext(retrieved: AskResponse["retrieved"]): string {
   return ctxLines.join("\n");
 }
 
+function deterministicFallbackAnswer(opts: {
+  query: string;
+  retrieved: AskResponse["retrieved"];
+  reason?: string;
+}): string {
+  const memories = Array.isArray(opts.retrieved?.memories) ? opts.retrieved.memories : [];
+  const docs = Array.isArray(opts.retrieved?.documents) ? opts.retrieved.documents : [];
+
+  const lines: string[] = [];
+  lines.push(`I searched project memory for: "${opts.query}"`);
+  lines.push("");
+  lines.push(`Retrieved evidence: ${memories.length} memories, ${docs.length} document matches.`);
+  lines.push("");
+
+  if (memories.length || docs.length) {
+    lines.push("Most relevant evidence:");
+    for (const m of memories.slice(0, 5)) {
+      lines.push(`- [mem:${m.id}] ${m.title} (${m.category})`);
+    }
+    for (const d of docs.slice(0, 3)) {
+      lines.push(`- [doc:${d.artifact_id}#${d.node_id}] ${d.title}`);
+    }
+    lines.push("");
+    lines.push("I can give a deeper synthesized answer after LLM synthesis is available again.");
+  } else {
+    lines.push("No matching evidence is recorded yet.");
+    lines.push("");
+    lines.push("Next steps:");
+    lines.push("- Record a memory with reproduction steps, expected vs actual, and outcome.");
+    lines.push("- Attach logs, screenshots, or build outputs as assets.");
+    lines.push("- Index docs/artifacts if the answer should come from manuals/specs.");
+  }
+
+  if (opts.reason) {
+    lines.push("");
+    lines.push(`Note: ${opts.reason}`);
+  }
+
+  return lines.join("\n");
+}
+
 function isTextLikeContentType(contentType: string | null | undefined): boolean {
   if (!contentType) return false;
   const ct = contentType.toLowerCase();
@@ -386,6 +427,7 @@ async function main(): Promise<void> {
   } else if (!anthropicKey) {
     notes.push("ANTHROPIC_API_KEY not configured for sandbox run (no synthesis).");
   } else {
+    try {
     trace({ type: "status", sessionId, message: "running agent loop (anthropic tools)" });
 
     const tools: AnthropicTool[] = [
@@ -1055,20 +1097,20 @@ async function main(): Promise<void> {
     (retrieved as any).memories = mergedRetrieved.memories;
     (retrieved as any).assets_index = mergedRetrieved.assets_index;
     (retrieved as any).documents = (mergedRetrieved as any).documents || [];
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      notes.push(`LLM synthesis failed: ${msg}`);
+      trace({ type: "llm_error", sessionId, error: msg });
+    }
   }
 
   if (!answer) {
-    // Deterministic fallback for environments without an LLM.
-    const top = retrieved.memories.slice(0, 8);
-    const lines = [
-      "No synthesis answer available.",
-      "",
-      top.length ? "Top evidence memories:" : "No memories matched this query.",
-      ...top.map((m) => `- [mem:${m.id}] ${m.title} (${m.category})`),
-      "",
-      "Next: record a memory for this topic, and attach logs/screenshots as assets so the agent has evidence to cite.",
-    ];
-    answer = lines.join("\n");
+    notes.push("Returned deterministic fallback answer from retrieved evidence.");
+    answer = deterministicFallbackAnswer({
+      query,
+      retrieved,
+      reason: notes[notes.length - 2] || undefined,
+    });
   }
 
   trace({ type: "status", sessionId, message: "done" });
@@ -1091,7 +1133,8 @@ main().catch((err) => {
   const sessionId = String(process.env.SESSION_ID || "");
   const projectId = String(process.env.PROJECT_ID || "");
   const query = String(process.env.PROMPT || "");
-  trace({ type: "error", sessionId, message: err instanceof Error ? err.message : String(err) });
+  const errorMessage = err instanceof Error ? err.message : String(err);
+  trace({ type: "error", sessionId, message: errorMessage });
 
   const out: RunnerOutput = {
     success: false,
@@ -1100,9 +1143,9 @@ main().catch((err) => {
     query,
     provider: { kind: "none" },
     retrieved: { memories: [], assets_index: {} },
-    answer: null,
-    notes: [],
-    error: err instanceof Error ? err.message : String(err),
+    answer: `The agent run failed before synthesis.\n\nError: ${errorMessage}\n\nTry again, and if this repeats, verify API/LLM configuration and session permissions.`,
+    notes: ["Runner failure fallback emitted."],
+    error: errorMessage,
   };
   // Always emit a final JSON line so the gateway can persist a failure deterministically.
   console.log(JSON.stringify(out));

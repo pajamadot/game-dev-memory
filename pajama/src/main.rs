@@ -72,6 +72,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: EvolveCmd,
     },
+
+    Agent {
+        #[command(subcommand)]
+        cmd: AgentCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -346,6 +351,44 @@ enum EvolveCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum AgentCmd {
+    /// Check agent service/LLM readiness.
+    Status {
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Ask the retrieval-first project memory agent.
+    Ask {
+        #[arg(long)]
+        query: String,
+
+        #[arg(long)]
+        project_id: Option<String>,
+
+        #[arg(long, default_value_t = 12)]
+        limit: u32,
+
+        #[arg(long, default_value_t = 8)]
+        document_limit: u32,
+
+        #[arg(long, default_value = "auto")]
+        memory_mode: String,
+
+        #[arg(long, default_value = "auto")]
+        retrieval_mode: String,
+
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct ProjectsListResponse {
     projects: Vec<ProjectRow>,
@@ -535,6 +578,10 @@ async fn main() -> Result<()> {
         Commands::Evolve { cmd } => {
             let api = authed_api(token.as_deref(), &cfg)?;
             handle_evolve(api, cmd).await?;
+        }
+        Commands::Agent { cmd } => {
+            let api = authed_api(token.as_deref(), &cfg)?;
+            handle_agent(api, cmd).await?;
         }
         Commands::ConfigPath => unreachable!("handled above"),
     }
@@ -1191,6 +1238,105 @@ async fn handle_evolve(api: ApiClient, cmd: EvolveCmd) -> Result<()> {
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
                 println!("best_project             {} :: {} ({:.6})", project, arm, score);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_agent(api: ApiClient, cmd: AgentCmd) -> Result<()> {
+    match cmd {
+        AgentCmd::Status { json } => {
+            let res: serde_json::Value = api.get_json("/api/agent/status", &[]).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let ok = res.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+            let service = res.get("service").and_then(|v| v.as_str()).unwrap_or("-");
+            let has_llm = res
+                .get("llm")
+                .and_then(|v| v.get("anthropic_configured"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let model = res
+                .get("llm")
+                .and_then(|v| v.get("model"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+
+            println!("ok               {}", ok);
+            println!("service          {}", service);
+            println!("anthropic_ready  {}", has_llm);
+            println!("model            {}", model);
+        }
+        AgentCmd::Ask {
+            query,
+            project_id,
+            limit,
+            document_limit,
+            memory_mode,
+            retrieval_mode,
+            dry_run,
+            json,
+        } => {
+            let payload = serde_json::json!({
+                "query": query,
+                "project_id": project_id,
+                "limit": limit,
+                "document_limit": document_limit,
+                "memory_mode": memory_mode,
+                "retrieval_mode": retrieval_mode,
+                "include_assets": true,
+                "include_documents": true,
+                "dry_run": dry_run
+            });
+
+            let res: serde_json::Value = api.post_json("/api/agent/ask", &payload).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let answer = res.get("answer").and_then(|v| v.as_str()).unwrap_or("");
+            let memory_count = res
+                .get("retrieved")
+                .and_then(|v| v.get("memories"))
+                .and_then(|v| v.as_array())
+                .map(|v| v.len())
+                .unwrap_or(0);
+            let doc_count = res
+                .get("retrieved")
+                .and_then(|v| v.get("documents"))
+                .and_then(|v| v.as_array())
+                .map(|v| v.len())
+                .unwrap_or(0);
+            let mode = res
+                .get("memory_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let provider = res
+                .get("provider")
+                .and_then(|v| v.get("kind"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+
+            println!("memory_mode      {}", mode);
+            println!("provider         {}", provider);
+            println!("evidence         {} memories, {} documents", memory_count, doc_count);
+            println!();
+            println!("{}", answer);
+
+            if let Some(notes) = res.get("notes").and_then(|v| v.as_array()) {
+                if !notes.is_empty() {
+                    println!();
+                    println!("notes:");
+                    for n in notes.iter().filter_map(|v| v.as_str()) {
+                        println!("- {}", n);
+                    }
+                }
             }
         }
     }
