@@ -219,6 +219,16 @@ enum AssetsCmd {
 
 #[derive(Subcommand)]
 enum EvolveCmd {
+    /// Show the active retrieval policy for a project.
+    Policy {
+        #[arg(long)]
+        project_id: String,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show the latest arena winner/policy snapshot.
     ArenaLatest {
         #[arg(long)]
@@ -798,6 +808,58 @@ async fn handle_assets(api: ApiClient, cmd: AssetsCmd) -> Result<()> {
 
 async fn handle_evolve(api: ApiClient, cmd: EvolveCmd) -> Result<()> {
     match cmd {
+        EvolveCmd::Policy { project_id, json } => {
+            let query = vec![("project_id", project_id)];
+            let res: serde_json::Value =
+                api.get_json("/api/evolve/retrieval-policy", &query).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let recommendation = res
+                .get("recommendation")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            if recommendation.is_null() {
+                println!("no retrieval policy found for project");
+                return Ok(());
+            }
+
+            let arm_id = recommendation
+                .get("arm_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let memory_mode = recommendation
+                .get("memory_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let retrieval_mode = recommendation
+                .get("retrieval_mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let source = recommendation
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let selected_at = recommendation
+                .get("selected_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let confidence = recommendation
+                .get("confidence")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(-1.0);
+
+            println!("arm_id         {}", arm_id);
+            println!("memory_mode    {}", memory_mode);
+            println!("retrieval_mode {}", retrieval_mode);
+            println!("source         {}", source);
+            println!("selected_at    {}", selected_at);
+            if confidence >= 0.0 {
+                println!("confidence     {:.6}", confidence);
+            }
+        }
         EvolveCmd::ArenaLatest { project_id, json } => {
             let mut query: Vec<(&str, String)> = vec![];
             if let Some(v) = project_id {

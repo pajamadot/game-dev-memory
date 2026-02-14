@@ -16,7 +16,7 @@ impl ApiClient {
         let base = Url::parse(api_base_url)
             .with_context(|| format!("invalid api base url: {api_base_url}"))?;
         let client = reqwest::Client::builder()
-            .user_agent("pajama-cli/0.1.2")
+            .user_agent("pajama-cli/0.1.3")
             .build()
             .context("build http client")?;
 

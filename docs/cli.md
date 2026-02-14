@@ -64,6 +64,7 @@ pajama memories create --project-id <project-uuid> --category bug --title "Crash
 pajama assets upload --project-id <project-uuid> --path "C:\\tmp\\build.zip"
 
 # Evolve (arena)
+pajama evolve policy --project-id <project-uuid>
 pajama evolve arena-latest --project-id <project-uuid>
 pajama evolve arena-run --project-id <project-uuid>
 pajama evolve arena-iterate --project-id <project-uuid> --iterations 300 --time-budget-ms 300000

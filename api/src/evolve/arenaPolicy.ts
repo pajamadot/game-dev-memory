@@ -9,6 +9,8 @@ export type ArenaRecommendation = {
   memory_mode: MemorySearchMode;
   retrieval_mode: ArenaRetrievalMode;
   selected_at: string | null;
+  source?: string | null;
+  confidence?: number | null;
 };
 
 const ARM_TO_POLICY: Record<string, { memory_mode: MemorySearchMode; retrieval_mode: ArenaRetrievalMode }> = {
@@ -20,6 +22,7 @@ const ARM_TO_POLICY: Record<string, { memory_mode: MemorySearchMode; retrieval_m
 };
 
 function asString(v: unknown): string {
+  if (v instanceof Date && Number.isFinite(v.getTime())) return v.toISOString();
   return typeof v === "string" ? v.trim() : "";
 }
 
@@ -51,6 +54,34 @@ export async function getLatestArenaRecommendation(
   input: { tenantType: TenantType; tenantId: string; projectId?: string | null }
 ): Promise<ArenaRecommendation | null> {
   const projectId = asString(input.projectId);
+
+  if (projectId) {
+    const policyRow = (
+      await db.query(
+        `SELECT arm_id, memory_mode, retrieval_mode, updated_at, source, confidence
+         FROM project_retrieval_policies
+         WHERE tenant_type = $1 AND tenant_id = $2 AND project_id = $3
+         LIMIT 1`,
+        [input.tenantType, input.tenantId, projectId]
+      )
+    ).rows[0];
+
+    if (policyRow) {
+      const armId = asString((policyRow as any).arm_id);
+      const base = policyFromArmId(armId);
+      if (base) {
+        return {
+          ...base,
+          selected_at: asString((policyRow as any).updated_at) || null,
+          source: asString((policyRow as any).source) || "arena",
+          confidence:
+            typeof (policyRow as any).confidence === "number" && Number.isFinite((policyRow as any).confidence)
+              ? (policyRow as any).confidence
+              : null,
+        };
+      }
+    }
+  }
 
   const fetchLatest = async (forProjectId: string | null): Promise<any | null> => {
     const params: unknown[] = [input.tenantType, input.tenantId];
@@ -86,6 +117,7 @@ export async function getLatestArenaRecommendation(
   return {
     ...base,
     selected_at: asString((row as any).created_at) || null,
+    source: "evolution_events",
+    confidence: null,
   };
 }
-

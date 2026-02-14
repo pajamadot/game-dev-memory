@@ -111,6 +111,14 @@ const DEFAULT_ARMS: ArenaArm[] = [
   { arm_id: "deep_hybrid", memory_mode: "deep", retrieval_mode: "hybrid", use_memories: true, use_documents: true },
 ];
 
+function policyFromArmId(armId: string | null | undefined): { arm_id: string; memory_mode: MemorySearchMode; retrieval_mode: "memories" | "hybrid" } | null {
+  const key = safeString(armId);
+  if (!key) return null;
+  const arm = DEFAULT_ARMS.find((a) => a.arm_id === key);
+  if (!arm) return null;
+  return { arm_id: arm.arm_id, memory_mode: arm.memory_mode, retrieval_mode: arm.retrieval_mode };
+}
+
 function clampInt(v: unknown, fallback: number, min: number, max: number): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) : NaN;
   if (!Number.isFinite(n)) return fallback;
@@ -459,6 +467,50 @@ async function recordArenaEvolutionEvent(
   );
 }
 
+async function upsertProjectRetrievalPolicy(
+  db: Client,
+  input: {
+    tenantType: TenantType;
+    tenantId: string;
+    actorId: string | null;
+    projectId: string | null;
+    selectedArmId: string | null;
+    avgScore: number;
+  }
+): Promise<void> {
+  if (!input.projectId) return;
+  const policy = policyFromArmId(input.selectedArmId);
+  if (!policy) return;
+
+  const confidence = Math.max(0, Math.min(1, Number.isFinite(input.avgScore) ? input.avgScore : 0.5));
+  await db.query(
+    `INSERT INTO project_retrieval_policies (
+       tenant_type, tenant_id, project_id, arm_id, memory_mode, retrieval_mode,
+       source, confidence, updated_at, updated_by
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, 'arena', $7, now(), $8)
+     ON CONFLICT (tenant_type, tenant_id, project_id)
+     DO UPDATE SET
+       arm_id = EXCLUDED.arm_id,
+       memory_mode = EXCLUDED.memory_mode,
+       retrieval_mode = EXCLUDED.retrieval_mode,
+       source = EXCLUDED.source,
+       confidence = EXCLUDED.confidence,
+       updated_at = now(),
+       updated_by = EXCLUDED.updated_by`,
+    [
+      input.tenantType,
+      input.tenantId,
+      input.projectId,
+      policy.arm_id,
+      policy.memory_mode,
+      policy.retrieval_mode,
+      confidence,
+      input.actorId,
+    ]
+  );
+}
+
 export async function runMemoryArena(db: Client, input: ArenaRunInput): Promise<ArenaRunResult> {
   const projectId = input.projectId || null;
   const sessionKinds = (Array.isArray(input.sessionKinds) && input.sessionKinds.length
@@ -547,6 +599,16 @@ export async function runMemoryArena(db: Client, input: ArenaRunInput): Promise<
         document_limit: documentLimit,
       },
     },
+  });
+
+  const selectedArmMetrics = armResults.find((a) => a.arm_id === output.selected_next) || null;
+  await upsertProjectRetrievalPolicy(db, {
+    tenantType: input.tenantType,
+    tenantId: input.tenantId,
+    actorId: input.actorId,
+    projectId,
+    selectedArmId: output.selected_next || output.winner_bandit || output.winner_current,
+    avgScore: selectedArmMetrics?.avg_score ?? armResults[0]?.avg_score ?? 0.5,
   });
 
   return output;

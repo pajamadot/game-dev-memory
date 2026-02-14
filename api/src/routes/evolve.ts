@@ -3,6 +3,7 @@ import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
 import { runMemoryArena, runMemoryArenaIterations } from "../evolve/memoryArena";
+import { getLatestArenaRecommendation } from "../evolve/arenaPolicy";
 
 export const evolveRouter = new Hono<AppEnv>();
 
@@ -263,5 +264,22 @@ evolveRouter.get("/memory-arena/latest", async (c) => {
       created_by: (latest as any).created_by ? String((latest as any).created_by) : null,
       arena: changes.arena ?? null,
     },
+  });
+});
+
+// Get the currently selected retrieval policy for a project (materialized policy first, then arena history fallback).
+evolveRouter.get("/retrieval-policy", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const projectId = (c.req.query("project_id") || "").trim();
+  if (!projectId) return c.json({ ok: false, error: "project_id is required" }, 400);
+
+  const recommendation = await withDbClient(c.env, async (db) =>
+    await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId })
+  );
+
+  return c.json({
+    ok: true,
+    project_id: projectId,
+    recommendation: recommendation || null,
   });
 });

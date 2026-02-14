@@ -153,3 +153,21 @@ $req = @{
 
 Invoke-RestMethod $mcp -Method Post -Headers $h -ContentType "application/json" -Body $req
 ```
+
+## Evolution + Retrieval Policy
+
+Arena endpoints:
+
+- `POST /api/evolve/memory-arena/run`
+- `POST /api/evolve/memory-arena/iterate`
+- `GET /api/evolve/memory-arena/latest`
+
+Project retrieval policy endpoint (materialized winner for hot agent paths):
+
+- `GET /api/evolve/retrieval-policy?project_id=<project-uuid>`
+
+Example:
+
+```powershell
+Invoke-RestMethod "$api/api/evolve/retrieval-policy?project_id=<project-uuid>" -Headers $h
+```

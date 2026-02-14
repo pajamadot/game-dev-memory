@@ -27,6 +27,7 @@ pajama projects list
 pajama projects create --name "UE5 Prototype" --engine unreal --description "Memory sandbox"
 
 # Run retrieval evolution from CLI
+pajama evolve policy --project-id <project-uuid>
 pajama evolve arena-latest --project-id <project-uuid>
 pajama evolve arena-run --project-id <project-uuid>
 pajama evolve arena-iterate --project-id <project-uuid> --iterations 300 --time-budget-ms 300000
