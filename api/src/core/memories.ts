@@ -46,7 +46,7 @@ export interface ListMemoriesQuery {
   sessionId?: string | null;
   states?: MemoryState[] | null;
   excludeCategoryPrefixes?: string[] | null;
-  mode?: "full" | "retrieval";
+  mode?: "full" | "retrieval" | "preview" | "index";
   memoryMode?: MemorySearchMode | null;
   limit?: number | null;
 }
@@ -90,13 +90,25 @@ export async function listMemories(
   const excludeCategoryPrefixes = Array.isArray(q.excludeCategoryPrefixes)
     ? q.excludeCategoryPrefixes.map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean).slice(0, 16)
     : [];
-  const mode = q.mode === "retrieval" ? "retrieval" : "full";
+  const mode: NonNullable<ListMemoriesQuery["mode"]> =
+    q.mode === "retrieval" || q.mode === "preview" || q.mode === "index" ? q.mode : "full";
   const memoryMode: MemorySearchMode = q.memoryMode === "fast" || q.memoryMode === "deep" ? q.memoryMode : "balanced";
   const limit = Math.min(Math.max(q.limit || 50, 1), 200);
+  // "index"/"preview" exist to avoid pulling huge content blobs when a caller only needs a snippet.
+  // Do not change the WHERE semantics: FTS/ILIKE still search the full `memories.content` column.
+  const previewChars = 8000;
   const selectClause =
-    mode === "retrieval"
-      ? "SELECT id, project_id, category, title, content, tags, confidence, updated_at, state, quality, source_type, session_id"
-      : "SELECT *";
+    mode === "full"
+      ? "SELECT *"
+      : mode === "preview"
+        ? `SELECT id, project_id, session_id, category, source_type, title,
+             LEFT(COALESCE(content, ''), ${previewChars}) AS content,
+             tags, context, confidence, access_count, state, quality, created_at, updated_at, created_by, updated_by`
+        : mode === "index"
+          ? `SELECT id, project_id, category, title,
+               LEFT(COALESCE(content, ''), ${previewChars}) AS content,
+               tags, confidence, updated_at, state, quality, source_type, session_id`
+          : "SELECT id, project_id, category, title, content, tags, confidence, updated_at, state, quality, source_type, session_id";
 
   let where = "FROM memories WHERE tenant_type = $1 AND tenant_id = $2";
   const params: unknown[] = [tenantType, tenantId];

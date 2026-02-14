@@ -62,13 +62,25 @@ memoriesRouter.get("/", async (c) => {
   const tag = c.req.query("tag") || null;
   const sessionId = c.req.query("session_id") || null;
   const includeInactive = truthy(c.req.query("include_inactive") || c.req.query("all_states"));
+  const includeContentParam = c.req.query("include_content");
+  const includeContent = includeContentParam === undefined || includeContentParam === null ? true : truthy(includeContentParam);
   const stateParam = c.req.query("state") || null;
   const limit = parseInt(c.req.query("limit") || "50");
 
   const states = parseStates({ includeInactive, stateParam });
 
   const memories = await withDbClient(c.env, async (db) =>
-    await listMemories(db, tenantType, tenantId, { projectId, category, search, tag, sessionId, states, memoryMode, limit })
+    await listMemories(db, tenantType, tenantId, {
+      projectId,
+      category,
+      search,
+      tag,
+      sessionId,
+      states,
+      memoryMode,
+      limit,
+      mode: includeContent ? "full" : "preview",
+    })
   );
 
   return c.json({ memories, meta: { total: memories.length, memory_mode: memoryMode } });

@@ -205,7 +205,8 @@ pajama login
     const sessRes = await apiJson<{ sessions: Session[] }>("/api/sessions?limit=25");
     sessions = sessRes.sessions || [];
 
-    const memRes = await apiJson<{ memories: Memory[] }>("/api/memories?limit=50");
+    // Avoid pulling large memory bodies for the console list view.
+    const memRes = await apiJson<{ memories: Memory[] }>("/api/memories?limit=50&include_content=false");
     memories = memRes.memories || [];
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);

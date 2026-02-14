@@ -175,7 +175,7 @@ const memoriesFtsProvider: MemorySearchProvider = {
       sessionId: input.sessionId || null,
       tag: input.tag || null,
       search: input.query || null,
-      mode: "retrieval",
+      mode: "index",
       memoryMode: input.memoryMode,
       states: input.states,
       limit: input.limit,
@@ -194,7 +194,7 @@ const recentActivityProvider: MemorySearchProvider = {
       sessionId: input.sessionId || null,
       tag: input.tag || null,
       search: null,
-      mode: "retrieval",
+      mode: "index",
       memoryMode: "fast",
       states: input.states,
       limit: Math.min(Math.max(input.limit * 3, input.limit), 200),
@@ -364,4 +364,3 @@ export async function batchGetMemories(db: Client, input: MemoryBatchGetInput): 
     resolved: memories.length,
   };
 }
-
