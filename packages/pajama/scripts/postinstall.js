@@ -25,6 +25,10 @@ function binaryName() {
   return process.platform === "win32" ? "pajama.exe" : "pajama";
 }
 
+function versionStampPath() {
+  return path.join(__dirname, "..", "bin", ".pajama-version");
+}
+
 function baseUrl() {
   const fromEnv = (process.env.PAJAMA_DOWNLOAD_BASE_URL || "").trim();
   return fromEnv || "https://api-game-dev-memory.pajamadot.com/downloads/pajama";
@@ -81,13 +85,19 @@ async function main() {
   const url = `${baseUrl()}/${tag}/${asset}`;
   const shaUrl = `${url}.sha256`;
   const dst = path.join(__dirname, "..", "bin", binaryName());
+  const stamp = versionStampPath();
 
-  // Skip if already present.
-  if (fs.existsSync(dst)) return;
+  // Skip only when both binary and version stamp match.
+  if (fs.existsSync(dst) && fs.existsSync(stamp)) {
+    const installedVersion = fs.readFileSync(stamp, "utf8").trim();
+    if (installedVersion === pkg.version) return;
+  }
 
   console.error(`[pajama] Downloading ${url}`);
   await downloadToFile(url, dst);
   await maybeVerifySha256(shaUrl, dst);
+
+  fs.writeFileSync(stamp, `${pkg.version}\n`, "utf8");
 
   if (process.platform !== "win32") {
     fs.chmodSync(dst, 0o755);
@@ -98,4 +108,3 @@ main().catch((err) => {
   console.error("[pajama] Install failed:", err && err.message ? err.message : String(err));
   process.exit(1);
 });
-

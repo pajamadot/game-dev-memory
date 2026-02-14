@@ -2,7 +2,8 @@ import type { Env } from "../types";
 import type { AuthContext } from "../auth/types";
 import { withDbClient } from "../db";
 import { listProjects, createProject } from "../core/projects";
-import { listMemories, createMemory, getMemory } from "../core/memories";
+import { listMemories, createMemory, getMemory, type MemoryState } from "../core/memories";
+import { batchGetMemories, listMemorySearchProviders, listMemoryTimeline, searchMemoryIndex } from "../core/memoryRetrieval";
 import type { TenantType } from "../tenant";
 
 export const MCP_PROTOCOL_VERSIONS = ["2025-03-26", "2024-11-05"] as const;
@@ -128,6 +129,66 @@ const tools: McpTool[] = [
     },
   },
   {
+    name: "memories.search_index",
+    description: "Progressive-disclosure memory search: compact ranked hits for low-token agent routing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string" },
+        category: { type: "string" },
+        session_id: { type: "string" },
+        q: { type: "string" },
+        tag: { type: "string" },
+        provider: { type: "string", enum: ["memories_fts", "recent_activity"] },
+        memory_mode: { type: "string", enum: ["fast", "balanced", "deep"] },
+        state: { type: "string", enum: ["active", "superseded", "quarantined"] },
+        include_inactive: { type: "boolean" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "memories.batch_get",
+    description: "Fetch multiple memories by id in one call.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 200 },
+        include_content: { type: "boolean" },
+      },
+      required: ["ids"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "memories.timeline",
+    description: "Get a compact time-ordered memory feed for a project/session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string" },
+        category: { type: "string" },
+        session_id: { type: "string" },
+        state: { type: "string", enum: ["active", "superseded", "quarantined"] },
+        include_inactive: { type: "boolean" },
+        before: { type: "string" },
+        after: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: 500 },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "memories.providers",
+    description: "List available memory retrieval providers/strategies.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
     name: "memories.get",
     description: "Fetch a single memory by id (increments access_count).",
     inputSchema: {
@@ -166,6 +227,10 @@ function resolveProtocolVersion(requested: unknown): string {
     return requested;
   }
   return MCP_PROTOCOL_VERSIONS[0];
+}
+
+function parseMemoryState(v: unknown): MemoryState | null {
+  return v === "active" || v === "superseded" || v === "quarantined" ? v : null;
 }
 
 export async function handleMcpJsonRpc(env: Env, auth: AuthContext, request: McpRequest): Promise<McpResponse> {
@@ -260,6 +325,88 @@ export async function handleMcpJsonRpc(env: Env, auth: AuthContext, request: Mcp
           return okResponse(id, jsonContent({ memories, meta: { total: memories.length } }));
         }
 
+        if (toolName === "memories.providers") {
+          const providers = listMemorySearchProviders();
+          return okResponse(id, jsonContent({ providers }));
+        }
+
+        if (toolName === "memories.search_index") {
+          const limit = Math.min(Number(toolArgs["limit"] || 20), 100);
+          const projectId = typeof toolArgs["project_id"] === "string" ? toolArgs["project_id"] : null;
+          const category = typeof toolArgs["category"] === "string" ? toolArgs["category"] : null;
+          const sessionId = typeof toolArgs["session_id"] === "string" ? toolArgs["session_id"] : null;
+          const search = typeof toolArgs["q"] === "string" ? toolArgs["q"] : "";
+          const tag = typeof toolArgs["tag"] === "string" ? toolArgs["tag"] : null;
+          const provider = typeof toolArgs["provider"] === "string" ? toolArgs["provider"] : null;
+          const memoryModeRaw = typeof toolArgs["memory_mode"] === "string" ? toolArgs["memory_mode"] : null;
+          const memoryMode = memoryModeRaw === "fast" || memoryModeRaw === "deep" ? memoryModeRaw : "balanced";
+          const includeInactive = toolArgs["include_inactive"] === true;
+          const state = parseMemoryState(toolArgs["state"]);
+          const states: MemoryState[] | null | undefined = includeInactive ? null : state ? [state] : undefined;
+
+          const result = await withDbClient(env, async (db) =>
+            await searchMemoryIndex(db, {
+              tenantType,
+              tenantId,
+              projectId,
+              category,
+              sessionId,
+              tag,
+              query: search,
+              provider,
+              memoryMode,
+              states,
+              limit,
+            })
+          );
+          return okResponse(id, jsonContent(result as unknown as Record<string, unknown>));
+        }
+
+        if (toolName === "memories.batch_get") {
+          const ids = Array.isArray(toolArgs["ids"])
+            ? (toolArgs["ids"] as unknown[]).filter((v): v is string => typeof v === "string")
+            : [];
+          if (ids.length === 0) return errorResponse(id, MCP_ERROR_CODES.INVALID_PARAMS, "ids is required");
+          const includeContent = toolArgs["include_content"] !== false;
+
+          const result = await withDbClient(env, async (db) =>
+            await batchGetMemories(db, {
+              tenantType,
+              tenantId,
+              ids,
+              includeContent,
+            })
+          );
+          return okResponse(id, jsonContent(result as unknown as Record<string, unknown>));
+        }
+
+        if (toolName === "memories.timeline") {
+          const projectId = typeof toolArgs["project_id"] === "string" ? toolArgs["project_id"] : null;
+          const category = typeof toolArgs["category"] === "string" ? toolArgs["category"] : null;
+          const sessionId = typeof toolArgs["session_id"] === "string" ? toolArgs["session_id"] : null;
+          const includeInactive = toolArgs["include_inactive"] === true;
+          const state = parseMemoryState(toolArgs["state"]);
+          const states: MemoryState[] | null | undefined = includeInactive ? null : state ? [state] : undefined;
+          const before = typeof toolArgs["before"] === "string" ? toolArgs["before"] : null;
+          const after = typeof toolArgs["after"] === "string" ? toolArgs["after"] : null;
+          const limit = Math.min(Number(toolArgs["limit"] || 100), 500);
+
+          const result = await withDbClient(env, async (db) =>
+            await listMemoryTimeline(db, {
+              tenantType,
+              tenantId,
+              projectId,
+              category,
+              sessionId,
+              states,
+              before,
+              after,
+              limit,
+            })
+          );
+          return okResponse(id, jsonContent(result as unknown as Record<string, unknown>));
+        }
+
         if (toolName === "memories.get") {
           const memId = String(toolArgs["id"] || "").trim();
           if (!memId) return errorResponse(id, MCP_ERROR_CODES.INVALID_PARAMS, "id is required");
@@ -321,4 +468,3 @@ export async function handleMcpJsonRpc(env: Env, auth: AuthContext, request: Mcp
       return errorResponse(id, MCP_ERROR_CODES.METHOD_NOT_FOUND, `Unknown method: ${method}`);
   }
 }
-

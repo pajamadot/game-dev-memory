@@ -33,6 +33,7 @@ This project is built around one core rule:
 - API key system for service/agent access.
 - OAuth PKCE for MCP/CLI login.
 - Project/session/memory CRUD + retrieval.
+- Progressive-disclosure memory retrieval (`search-index`, `batch-get`, `timeline`, provider discovery).
 - Large file multipart upload to R2 (10GB+ capable with multipart part sizing).
 - Artifact indexing with PageIndex (TypeScript port) and document-node retrieval.
 - Streaming agent sessions (`agent-pro`) backed by Cloudflare Sandbox.
@@ -198,7 +199,7 @@ Migrations in `api/migrations/`:
 - npm-distributed installer package for prebuilt binaries.
 - Current notable commands:
   - `pajama projects ...`
-  - `pajama memories ...`
+  - `pajama memories list|search-index|batch-get|timeline|create`
   - `pajama assets ...`
   - `pajama evolve policy|arena-*`
   - `pajama agent status`
@@ -329,4 +330,3 @@ Detailed runbook:
 - `docs/deployment.md`
 - `docs/e2e.md`
 - `docs/roadmap.md`
-

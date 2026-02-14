@@ -13,6 +13,7 @@ import {
   type MemorySearchMode,
   type MemoryState,
 } from "../core/memories";
+import { batchGetMemories, listMemorySearchProviders, listMemoryTimeline, searchMemoryIndex } from "../core/memoryRetrieval";
 
 export const memoriesRouter = new Hono<AppEnv>();
 
@@ -38,6 +39,12 @@ function normalizeMemoryMode(v: unknown): MemorySearchMode {
   return "balanced";
 }
 
+function parseStates(opts: { includeInactive: boolean; stateParam: string | null }): MemoryState[] | null | undefined {
+  if (opts.includeInactive) return null;
+  if (!opts.stateParam) return undefined;
+  return isMemoryState(opts.stateParam) ? [opts.stateParam] : ["active"];
+}
+
 function safeRelation(v: unknown): string {
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return "related";
@@ -58,18 +65,114 @@ memoriesRouter.get("/", async (c) => {
   const stateParam = c.req.query("state") || null;
   const limit = parseInt(c.req.query("limit") || "50");
 
-  let states: MemoryState[] | null | undefined = undefined;
-  if (includeInactive) {
-    states = null; // no state filter
-  } else if (stateParam) {
-    states = isMemoryState(stateParam) ? [stateParam] : ["active"];
-  }
+  const states = parseStates({ includeInactive, stateParam });
 
   const memories = await withDbClient(c.env, async (db) =>
     await listMemories(db, tenantType, tenantId, { projectId, category, search, tag, sessionId, states, memoryMode, limit })
   );
 
   return c.json({ memories, meta: { total: memories.length, memory_mode: memoryMode } });
+});
+
+// List search providers available for progressive-disclosure retrieval.
+memoriesRouter.get("/providers", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  void tenantType;
+  void tenantId;
+  return c.json({ providers: listMemorySearchProviders() });
+});
+
+// Progressive-disclosure index search:
+// returns compact ranked hits first (id/title/excerpt/tokens), then clients can batch fetch full records.
+memoriesRouter.get("/search-index", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const projectId = c.req.query("project_id") || null;
+  const category = c.req.query("category") || null;
+  const sessionId = c.req.query("session_id") || null;
+  const tag = c.req.query("tag") || null;
+  const search = c.req.query("q") || "";
+  const provider = c.req.query("provider") || c.req.query("strategy") || null;
+  const memoryMode = normalizeMemoryMode(c.req.query("memory_mode") || c.req.query("search_mode"));
+  const includeInactive = truthy(c.req.query("include_inactive") || c.req.query("all_states"));
+  const stateParam = c.req.query("state") || null;
+  const limit = parseInt(c.req.query("limit") || "20");
+  const states = parseStates({ includeInactive, stateParam });
+
+  const result = await withDbClient(c.env, async (db) =>
+    await searchMemoryIndex(db, {
+      tenantType,
+      tenantId,
+      projectId,
+      category,
+      sessionId,
+      tag,
+      query: search,
+      provider,
+      memoryMode,
+      states,
+      limit,
+    })
+  );
+
+  return c.json({
+    ...result,
+    meta: {
+      total: result.hits.length,
+      next: "POST /api/memories/batch-get",
+      token_estimate_total: result.token_estimate_total,
+    },
+  });
+});
+
+// Time-ordered compact feed for session/project memory browsing.
+memoriesRouter.get("/timeline", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const projectId = c.req.query("project_id") || null;
+  const category = c.req.query("category") || null;
+  const sessionId = c.req.query("session_id") || null;
+  const includeInactive = truthy(c.req.query("include_inactive") || c.req.query("all_states"));
+  const stateParam = c.req.query("state") || null;
+  const before = c.req.query("before") || null;
+  const after = c.req.query("after") || null;
+  const limit = parseInt(c.req.query("limit") || "100");
+  const states = parseStates({ includeInactive, stateParam });
+
+  const result = await withDbClient(c.env, async (db) =>
+    await listMemoryTimeline(db, {
+      tenantType,
+      tenantId,
+      projectId,
+      category,
+      sessionId,
+      states,
+      before,
+      after,
+      limit,
+    })
+  );
+
+  return c.json(result);
+});
+
+// Fetch multiple memories by id in one call (ordered by requested id list).
+memoriesRouter.post("/batch-get", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const body = await c.req.json().catch(() => ({}));
+  const ids = Array.isArray(body.ids)
+    ? body.ids.filter((v: unknown): v is string => typeof v === "string")
+    : [];
+  const includeContent = body.include_content !== false;
+
+  const result = await withDbClient(c.env, async (db) =>
+    await batchGetMemories(db, {
+      tenantType,
+      tenantId,
+      ids,
+      includeContent,
+    })
+  );
+
+  return c.json(result);
 });
 
 // Get single memory

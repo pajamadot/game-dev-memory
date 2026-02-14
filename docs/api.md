@@ -81,6 +81,38 @@ $body = @{
 Invoke-RestMethod "$api/api/memories" -Method Post -Headers $h -ContentType "application/json" -Body $body
 ```
 
+### Progressive-Disclosure Memory Retrieval
+
+Use these endpoints to keep agent context efficient:
+
+1. `GET /api/memories/search-index` for compact ranked hits (id/title/excerpt/token estimate).
+2. `POST /api/memories/batch-get` to fetch full records only for selected IDs.
+3. `GET /api/memories/timeline` for a compact time-ordered memory feed.
+4. `GET /api/memories/providers` to discover available retrieval providers.
+
+Search index:
+
+```powershell
+Invoke-RestMethod "$api/api/memories/search-index?project_id=<project-uuid>&q=build+failure&provider=memories_fts&memory_mode=balanced&limit=20" -Headers $h
+```
+
+Batch get:
+
+```powershell
+$body = @{
+  ids = @("<memory-id-1>", "<memory-id-2>")
+  include_content = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod "$api/api/memories/batch-get" -Method Post -Headers $h -ContentType "application/json" -Body $body
+```
+
+Timeline:
+
+```powershell
+Invoke-RestMethod "$api/api/memories/timeline?project_id=<project-uuid>&limit=100" -Headers $h
+```
+
 ## Assets (Large Files, R2 Multipart)
 
 Use assets for large binary files you want to reference from memories (zips, builds, pak files, crash dumps, captures).

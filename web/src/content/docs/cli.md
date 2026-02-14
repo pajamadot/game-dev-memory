@@ -82,6 +82,9 @@ Memories:
 ```powershell
 pajama memories list --project-id <project-uuid> --limit 50
 pajama memories create --project-id <project-uuid> --category bug --title "Crash on PIE exit" --content "Root cause..." --tags "unreal,crash"
+pajama memories search-index --project-id <project-uuid> --q "shader compile crash" --provider memories_fts --memory-mode balanced --limit 20
+pajama memories batch-get --ids <memory-id-1>,<memory-id-2>
+pajama memories timeline --project-id <project-uuid> --limit 100
 ```
 
 Assets (large files):

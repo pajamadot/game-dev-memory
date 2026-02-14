@@ -111,7 +111,7 @@ enum MemoriesCmd {
         #[arg(long)]
         category: Option<String>,
 
-        #[arg(long)]
+        #[arg(long, alias = "query")]
         q: Option<String>,
 
         #[arg(long)]
@@ -155,6 +155,89 @@ enum MemoriesCmd {
         /// Confidence 0..1
         #[arg(long, default_value_t = 0.5)]
         confidence: f64,
+    },
+
+    /// Progressive-disclosure index search (compact hits).
+    SearchIndex {
+        #[arg(long)]
+        project_id: Option<String>,
+
+        #[arg(long)]
+        category: Option<String>,
+
+        #[arg(long)]
+        session_id: Option<String>,
+
+        #[arg(long, alias = "query")]
+        q: Option<String>,
+
+        #[arg(long)]
+        tag: Option<String>,
+
+        #[arg(long)]
+        provider: Option<String>,
+
+        #[arg(long)]
+        state: Option<String>,
+
+        #[arg(long, default_value_t = false)]
+        include_inactive: bool,
+
+        #[arg(long, default_value = "balanced")]
+        memory_mode: String,
+
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Batch fetch memories by IDs.
+    BatchGet {
+        /// IDs as repeated flags or comma-separated values
+        #[arg(long, value_delimiter = ',')]
+        ids: Vec<String>,
+
+        /// Exclude full content body
+        #[arg(long, default_value_t = false)]
+        no_content: bool,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Compact time-ordered memory feed.
+    Timeline {
+        #[arg(long)]
+        project_id: Option<String>,
+
+        #[arg(long)]
+        category: Option<String>,
+
+        #[arg(long)]
+        session_id: Option<String>,
+
+        #[arg(long)]
+        state: Option<String>,
+
+        #[arg(long, default_value_t = false)]
+        include_inactive: bool,
+
+        #[arg(long)]
+        before: Option<String>,
+
+        #[arg(long)]
+        after: Option<String>,
+
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -716,6 +799,174 @@ async fn handle_memories(api: ApiClient, cmd: MemoriesCmd) -> Result<()> {
             };
             let res: CreateMemoryResponse = api.post_json("/api/memories", &req).await?;
             println!("{}", res.id);
+        }
+        MemoriesCmd::SearchIndex {
+            project_id,
+            category,
+            session_id,
+            q,
+            tag,
+            provider,
+            state,
+            include_inactive,
+            memory_mode,
+            limit,
+            json,
+        } => {
+            let mut query: Vec<(&str, String)> = vec![
+                ("limit", limit.to_string()),
+                ("memory_mode", memory_mode),
+            ];
+            if let Some(v) = project_id {
+                query.push(("project_id", v));
+            }
+            if let Some(v) = category {
+                query.push(("category", v));
+            }
+            if let Some(v) = session_id {
+                query.push(("session_id", v));
+            }
+            if let Some(v) = q {
+                query.push(("q", v));
+            }
+            if let Some(v) = tag {
+                query.push(("tag", v));
+            }
+            if let Some(v) = provider {
+                query.push(("provider", v));
+            }
+            if let Some(v) = state {
+                query.push(("state", v));
+            }
+            if include_inactive {
+                query.push(("include_inactive", "true".to_string()));
+            }
+
+            let res: serde_json::Value = api.get_json("/api/memories/search-index", &query).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let provider = res.get("provider").and_then(|v| v.as_str()).unwrap_or("-");
+            let token_total = res
+                .get("token_estimate_total")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let hits = res
+                .get("hits")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            println!("provider            {}", provider);
+            println!("hits                {}", hits.len());
+            println!("token_estimate      {}", token_total);
+            for h in hits {
+                let id = h.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                let title = h.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let category = h.get("category").and_then(|v| v.as_str()).unwrap_or("-");
+                let score = h.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                println!("{}\t{}\t{:.4}\t{}", id, category, score, title);
+            }
+        }
+        MemoriesCmd::BatchGet {
+            ids,
+            no_content,
+            json,
+        } => {
+            let ids: Vec<String> = ids
+                .into_iter()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+            if ids.is_empty() {
+                return Err(anyhow!("--ids is required"));
+            }
+
+            let payload = serde_json::json!({
+                "ids": ids,
+                "include_content": !no_content
+            });
+            let res: serde_json::Value = api.post_json("/api/memories/batch-get", &payload).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let requested = res.get("requested").and_then(|v| v.as_u64()).unwrap_or(0);
+            let resolved = res.get("resolved").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("requested  {}", requested);
+            println!("resolved   {}", resolved);
+            if let Some(memories) = res.get("memories").and_then(|v| v.as_array()) {
+                for m in memories {
+                    let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                    let category = m.get("category").and_then(|v| v.as_str()).unwrap_or("-");
+                    let title = m.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    println!("{}\t{}\t{}", id, category, title);
+                }
+            }
+            if let Some(missing) = res.get("missing_ids").and_then(|v| v.as_array()) {
+                if !missing.is_empty() {
+                    println!("missing");
+                    for id in missing.iter().filter_map(|v| v.as_str()) {
+                        println!("- {}", id);
+                    }
+                }
+            }
+        }
+        MemoriesCmd::Timeline {
+            project_id,
+            category,
+            session_id,
+            state,
+            include_inactive,
+            before,
+            after,
+            limit,
+            json,
+        } => {
+            let mut query: Vec<(&str, String)> = vec![("limit", limit.to_string())];
+            if let Some(v) = project_id {
+                query.push(("project_id", v));
+            }
+            if let Some(v) = category {
+                query.push(("category", v));
+            }
+            if let Some(v) = session_id {
+                query.push(("session_id", v));
+            }
+            if let Some(v) = state {
+                query.push(("state", v));
+            }
+            if let Some(v) = before {
+                query.push(("before", v));
+            }
+            if let Some(v) = after {
+                query.push(("after", v));
+            }
+            if include_inactive {
+                query.push(("include_inactive", "true".to_string()));
+            }
+
+            let res: serde_json::Value = api.get_json("/api/memories/timeline", &query).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+            let total = res.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+            let next_before = res.get("next_before").and_then(|v| v.as_str()).unwrap_or("-");
+            println!("total       {}", total);
+            println!("next_before {}", next_before);
+            if let Some(entries) = res.get("entries").and_then(|v| v.as_array()) {
+                for e in entries {
+                    let id = e.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                    let category = e.get("category").and_then(|v| v.as_str()).unwrap_or("-");
+                    let updated_at = e.get("updated_at").and_then(|v| v.as_str()).unwrap_or("-");
+                    let title = e.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    println!("{}\t{}\t{}\t{}", id, category, updated_at, title);
+                }
+            }
         }
     }
     Ok(())

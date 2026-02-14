@@ -25,6 +25,9 @@ Then use the Memory API:
 ```bash
 pajama projects list
 pajama projects create --name "UE5 Prototype" --engine unreal --description "Memory sandbox"
+pajama memories search-index --project-id <project-uuid> --q "cook failure" --provider memories_fts --memory-mode balanced --limit 20
+pajama memories batch-get --ids <memory-id-1>,<memory-id-2>
+pajama memories timeline --project-id <project-uuid> --limit 100
 
 # Run retrieval evolution from CLI
 pajama evolve policy --project-id <project-uuid>
