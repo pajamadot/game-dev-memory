@@ -39,7 +39,8 @@ test.describe("Public UX smoke", () => {
 
   test("agent page (logged out) renders", async ({ page }) => {
     await page.goto("/agent");
-    await expect(page.getByRole("heading", { name: /Project Memory Agent/i })).toBeVisible();
+    // /agent is a redirect to the streaming sessions UX.
+    await expect(page.getByRole("heading", { name: /Sign in required/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
   });
 
@@ -51,7 +52,8 @@ test.describe("Public UX smoke", () => {
 
   test("agent streaming pages (logged out) render", async ({ page }) => {
     await page.goto("/agent/streaming");
-    await expect(page.getByRole("heading", { name: /Game Dev Agent/i })).toBeVisible();
+    // /agent/streaming is a redirect to /agent/streaming/sessions.
+    await expect(page.getByRole("heading", { name: /Sign in required/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Sign in/i })).toBeVisible();
 
     await page.goto("/agent/streaming/sessions");

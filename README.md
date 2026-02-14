@@ -19,8 +19,8 @@ This project is built around one core rule:
 
 ### Current release state
 
-- Worker/API latest deployed version: `d37bf501-9c24-4d1e-ab3b-fa4f5aee8c69`
-- CLI latest npm package: `@pajamadot/pajama@0.1.5`
+- Worker/API latest deployed version: `0b64b801-77a3-4ad7-bc38-10db43ce5b38`
+- CLI latest npm package: `@pajamadot/pajama@0.1.8`
 - CLI binary download prefix:
   - `https://api-game-dev-memory.pajamadot.com/downloads/pajama/v{version}/{file}`
 - DB backend: Neon Postgres via Cloudflare Hyperdrive
@@ -40,6 +40,26 @@ This project is built around one core rule:
 - Deterministic fallback answers when LLM synthesis fails or is unavailable.
 - Retrieval evolution arena with project policy materialization and campaign mode.
 - Daily research digests ingested into memory via cron.
+
+## E2E Tests
+
+Local web UX smoke (starts `web` on `http://localhost:3040`):
+
+```powershell
+npm run e2e
+```
+
+Deployed/live smoke (web + API + MCP + agent host + CLI via `npx`):
+
+```powershell
+./scripts/e2e-live.ps1
+```
+
+Optionally enable authenticated checks (MCP tools/list, memory providers, CLI query):
+
+```powershell
+./scripts/e2e-live.ps1 -ApiToken "<your_api_key>"
+```
 
 ## Why This Exists
 
