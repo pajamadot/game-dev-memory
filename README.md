@@ -21,6 +21,7 @@ This project is built around one core rule:
 
 - Worker/API latest deployed version: `0b64b801-77a3-4ad7-bc38-10db43ce5b38`
 - CLI latest npm package: `@pajamadot/pajama@0.1.8`
+- Last end-to-end verification: February 14, 2026 (local build, local UX smoke, live smoke with authenticated checks)
 - CLI binary download prefix:
   - `https://api-game-dev-memory.pajamadot.com/downloads/pajama/v{version}/{file}`
 - DB backend: Neon Postgres via Cloudflare Hyperdrive
@@ -40,6 +41,7 @@ This project is built around one core rule:
 - Deterministic fallback answers when LLM synthesis fails or is unavailable.
 - Retrieval evolution arena with project policy materialization and campaign mode.
 - Daily research digests ingested into memory via cron.
+- Live end-to-end smoke suite for web/API/MCP/agent/CLI (Playwright + `npx @pajamadot/pajama`).
 
 ## E2E Tests
 
@@ -60,6 +62,71 @@ Optionally enable authenticated checks (MCP tools/list, memory providers, CLI qu
 ```powershell
 ./scripts/e2e-live.ps1 -ApiToken "<your_api_key>"
 ```
+
+## Production Quickstart
+
+### Install CLI
+
+```powershell
+npm i -g @pajamadot/pajama
+pajama --version
+```
+
+Or run without installing (downloads binary on first run):
+
+```powershell
+npx -y @pajamadot/pajama --version
+```
+
+### Login (OAuth PKCE)
+
+```powershell
+pajama login
+```
+
+This stores an API key locally (same auth used by MCP clients). You can always override with:
+
+```powershell
+pajama --token "gdm_..." projects list
+```
+
+### Create a project and record memory
+
+```powershell
+pajama projects create --name "My Unreal Project" --engine unreal --description "UE5 build + performance notes"
+```
+
+```powershell
+pajama memories create --project-id "<project_uuid>" --category "build" --title "UE5 packaging failed" --content "Repro steps + fix"
+```
+
+### Progressive retrieval (cheap index hits -> fetch full records)
+
+Index search:
+
+```powershell
+pajama memories search-index --project-id "<project_uuid>" --query "packaging error" --limit 5
+```
+
+Then fetch the records you want:
+
+```powershell
+pajama memories batch-get --ids "<uuid1>,<uuid2>" --no-content
+```
+
+### Upload a large file (10GB+ capable via multipart) and link it to a memory
+
+```powershell
+pajama assets upload --project-id "<project_uuid>" --path "C:\\logs\\build.zip" --memory-id "<memory_uuid>"
+```
+
+### Ask the agent (retrieval-first)
+
+```powershell
+pajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run
+```
+
+Remove `--dry-run` to request synthesis when LLM is configured on the Worker.
 
 ## Why This Exists
 
@@ -124,6 +191,22 @@ Core memory object includes:
 
 Memory lifecycle events are captured in `memory_events` for auditability.
 
+### Progressive-disclosure retrieval model
+
+Most agent flows should not pull full memory bodies immediately. We support a 2-step retrieval pattern:
+
+1. Search a compact index (id/title/excerpt/tokens).
+2. Batch fetch full records only for selected IDs.
+
+This is implemented in:
+
+- `api/src/core/memoryRetrieval.ts`
+- API routes: `/api/memories/search-index`, `/api/memories/batch-get`, `/api/memories/timeline`
+- MCP tools: `memories.search_index`, `memories.batch_get`, `memories.timeline`
+- CLI commands: `pajama memories search-index|batch-get|timeline`
+
+Providers/strategies are pluggable (`memories_fts`, `recent_activity`) and can be extended without changing clients.
+
 ### Evidence model
 
 Two evidence classes are first-class:
@@ -142,6 +225,31 @@ Memory retrieval supports three modes in `api/src/core/memories.ts`:
 - `deep`: expanded candidate retrieval + contextual neighbors
 
 Document retrieval uses PageIndex nodes when enabled (`hybrid`/`documents` paths).
+
+### Asset design (large file storage)
+
+Large binary objects live in R2; Postgres stores the metadata and upload state:
+
+- `assets`: one row per object (status, size, sha256, r2_key, upload_id, etc.)
+- `asset_upload_parts`: part ETags for resumable completion
+
+Assets can be linked to memories via `entity_links` using `/api/memories/:id/attach-asset`.
+
+### Artifact + PageIndex design (long document retrieval)
+
+Artifacts are for documents and text corpora that benefit from chunking + indexing:
+
+- `artifacts`: document metadata + R2 location (single or chunked)
+- `artifact_chunks`: extracted text chunks (optional)
+- `artifacts.metadata.pageindex`: hierarchical index (PageIndex-TS port)
+
+Core endpoints:
+
+- `POST /api/artifacts/:id/pageindex` build/rebuild an index
+- `GET /api/artifacts/:id/pageindex/query?q=...` retrieve best matching nodes
+- `GET /api/artifacts/:id/pageindex/node/:nodeId` fetch one node + breadcrumbs
+
+This enables agents to cite doc sections as evidence without vector DB dependencies.
 
 ### Evolution design
 
@@ -217,6 +325,10 @@ Migrations in `api/migrations/`:
 
 - Rust CLI with OAuth login and API-key operation.
 - npm-distributed installer package for prebuilt binaries.
+- Binary distribution:
+  - upload binaries to R2 under `releases/pajama/vX.Y.Z/...` (`scripts/release-pajama.ps1`)
+  - the API serves them under `/downloads/pajama/vX.Y.Z/...`
+  - the npm package downloads the right binary at install time (and refreshes on version mismatch)
 - Current notable commands:
   - `pajama projects ...`
   - `pajama memories list|search-index|batch-get|timeline|create`
@@ -224,6 +336,14 @@ Migrations in `api/migrations/`:
   - `pajama evolve policy|arena-*`
   - `pajama agent status`
   - `pajama agent ask`
+
+### PageIndex-TS (`packages/pageindex-ts/`)
+
+- Worker-friendly TypeScript port inspired by `VectifyAI/PageIndex` (MIT).
+- Used to build hierarchical indexes for artifacts and enable “document node” retrieval without a vector DB.
+- Research notes and port status:
+  - `research/pageindex.md`
+  - `packages/pageindex-ts/PORT_STATUS.md`
 
 ### Research pipeline
 
@@ -306,8 +426,9 @@ npm install
 npm run dev
 ```
 
-- Web: `http://localhost:3000`
-- API: `http://localhost:8787`
+- Web: `http://localhost:3000` (Next dev)
+- API: `http://localhost:8787` (Wrangler dev)
+- Playwright local E2E: `http://localhost:3040` (configurable via `PLAYWRIGHT_BASE_URL`)
 
 Apply DB migrations:
 
@@ -336,7 +457,7 @@ Detailed runbook:
 
 ## Current Gaps and Next Priorities
 
-- Expand automated end-to-end coverage (streaming UX + auth flows).
+- Expand automated end-to-end coverage to include Clerk login automation and streaming session flows.
 - Add structured retrieval benchmarking dashboards (quality + latency trends).
 - Improve CLI cross-platform binary matrix beyond current Windows x64 default path.
 - Continue hardening memory curation policies (quarantine, dedupe, decay, promotion).
