@@ -96,7 +96,8 @@ export async function listMemories(
   const limit = Math.min(Math.max(q.limit || 50, 1), 200);
   // "index"/"preview" exist to avoid pulling huge content blobs when a caller only needs a snippet.
   // Do not change the WHERE semantics: FTS/ILIKE still search the full `memories.content` column.
-  const previewChars = 8000;
+  const previewChars = 4000;
+  const indexChars = 2000;
   const selectClause =
     mode === "full"
       ? "SELECT *"
@@ -106,7 +107,7 @@ export async function listMemories(
              tags, context, confidence, access_count, state, quality, created_at, updated_at, created_by, updated_by`
         : mode === "index"
           ? `SELECT id, project_id, category, title,
-               LEFT(COALESCE(content, ''), ${previewChars}) AS content,
+              LEFT(COALESCE(content, ''), ${indexChars}) AS content,
                tags, confidence, updated_at, state, quality, source_type, session_id`
           : "SELECT id, project_id, category, title, content, tags, confidence, updated_at, state, quality, source_type, session_id";
 
@@ -286,16 +287,14 @@ export async function listMemories(
 }
 
 export async function getMemory(db: Client, tenantType: TenantType, tenantId: string, id: string) {
-  await db.query("UPDATE memories SET access_count = access_count + 1 WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
-    id,
-    tenantType,
-    tenantId,
-  ]);
-  const { rows } = await db.query("SELECT * FROM memories WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3", [
-    id,
-    tenantType,
-    tenantId,
-  ]);
+  // Single roundtrip: increment access_count and return the record.
+  const { rows } = await db.query(
+    `UPDATE memories
+     SET access_count = access_count + 1
+     WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3
+     RETURNING *`,
+    [id, tenantType, tenantId]
+  );
   return rows[0] ?? null;
 }
 
