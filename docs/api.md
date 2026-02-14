@@ -160,6 +160,7 @@ Arena endpoints:
 
 - `POST /api/evolve/memory-arena/run`
 - `POST /api/evolve/memory-arena/iterate`
+- `POST /api/evolve/memory-arena/campaign`
 - `GET /api/evolve/memory-arena/latest`
 
 Project retrieval policy endpoint (materialized winner for hot agent paths):
@@ -170,4 +171,17 @@ Example:
 
 ```powershell
 Invoke-RestMethod "$api/api/evolve/retrieval-policy?project_id=<project-uuid>" -Headers $h
+```
+
+Run a multi-project campaign:
+
+```powershell
+$body = @{
+  max_projects = 10
+  iterations_per_project = 200
+  time_budget_ms = 600000
+  persist_each_iteration = $false
+} | ConvertTo-Json
+
+Invoke-RestMethod "$api/api/evolve/memory-arena/campaign" -Method Post -Headers $h -ContentType "application/json" -Body $body
 ```

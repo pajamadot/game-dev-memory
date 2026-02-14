@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../appEnv";
 import { withDbClient } from "../db";
 import { requireTenant } from "../tenant";
-import { runMemoryArena, runMemoryArenaIterations } from "../evolve/memoryArena";
+import { runMemoryArena, runMemoryArenaCampaign, runMemoryArenaIterations } from "../evolve/memoryArena";
 import { getLatestArenaRecommendation } from "../evolve/arenaPolicy";
 
 export const evolveRouter = new Hono<AppEnv>();
@@ -34,6 +34,21 @@ function truthy(v: unknown): boolean {
   if (typeof v === "number") return v !== 0;
   const s = typeof v === "string" ? v.trim().toLowerCase() : "";
   return s === "1" || s === "true" || s === "yes" || s === "on";
+}
+
+function parseStringArray(v: unknown, limit = 100): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of v) {
+    if (typeof item !== "string") continue;
+    const value = item.trim();
+    if (!value || seen.has(value)) continue;
+    out.push(value);
+    seen.add(value);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 // Get evolution history
@@ -230,6 +245,39 @@ evolveRouter.post("/memory-arena/iterate", async (c) => {
   );
 
   return c.json({ ok: true, batch });
+});
+
+// Run arena iterations across multiple projects in a single campaign.
+evolveRouter.post("/memory-arena/campaign", async (c) => {
+  const { tenantType, tenantId, actorId } = requireTenant(c);
+  const body = await c.req.json().catch(() => ({}));
+
+  const projectIds = parseStringArray(body.project_ids, 200);
+  const sessionKinds = Array.isArray(body.session_kinds)
+    ? body.session_kinds.filter((v: unknown) => v === "agent" || v === "agent_pro")
+    : undefined;
+
+  const campaign = await withDbClient(c.env, async (db) =>
+    await runMemoryArenaCampaign(db, {
+      tenantType,
+      tenantId,
+      actorId,
+      projectIds: projectIds.length ? projectIds : undefined,
+      sessionKinds,
+      includeOpenSessions: !("include_open_sessions" in body) || truthy(body.include_open_sessions),
+      iterationsPerProject: clampInt(body.iterations_per_project, 100, 1, 1000),
+      maxProjects: clampInt(body.max_projects, 8, 1, 100),
+      timeBudgetMs: clampInt(body.time_budget_ms, 300_000, 1_000, 1_800_000),
+      stopWhenNoEpisodes: !("stop_when_no_episodes" in body) || truthy(body.stop_when_no_episodes),
+      persistEachIteration: "persist_each_iteration" in body ? truthy(body.persist_each_iteration) : false,
+      limitSessions: clampInt(body.limit_sessions, 30, 1, 200),
+      limitEpisodes: clampInt(body.limit_episodes, 80, 1, 400),
+      memoryLimit: clampInt(body.memory_limit, 16, 1, 80),
+      documentLimit: clampInt(body.document_limit, 8, 0, 50),
+    })
+  );
+
+  return c.json({ ok: true, campaign });
 });
 
 // Get the latest arena result from evolution events.

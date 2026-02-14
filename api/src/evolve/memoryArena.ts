@@ -62,6 +62,7 @@ type ArenaRunInput = {
   projectId?: string | null;
   sessionKinds?: SessionKind[] | null;
   includeOpenSessions?: boolean;
+  persistOutcome?: boolean;
   limitSessions?: number;
   limitEpisodes?: number;
   memoryLimit?: number;
@@ -91,6 +92,7 @@ type ArenaBatchRunInput = ArenaRunInput & {
   iterations: number;
   timeBudgetMs?: number;
   stopWhenNoEpisodes?: boolean;
+  persistEachIteration?: boolean;
 };
 
 type ArenaBatchRunResult = {
@@ -101,6 +103,44 @@ type ArenaBatchRunResult = {
   winner_tally: { arm_id: string; wins: number }[];
   average_scores: { arm_id: string; avg_score: number }[];
   last_run: ArenaRunResult | null;
+};
+
+type ArenaCampaignInput = {
+  tenantType: TenantType;
+  tenantId: string;
+  actorId: string | null;
+  projectIds?: string[] | null;
+  sessionKinds?: SessionKind[] | null;
+  includeOpenSessions?: boolean;
+  iterationsPerProject?: number;
+  maxProjects?: number;
+  timeBudgetMs?: number;
+  stopWhenNoEpisodes?: boolean;
+  persistEachIteration?: boolean;
+  limitSessions?: number;
+  limitEpisodes?: number;
+  memoryLimit?: number;
+  documentLimit?: number;
+};
+
+type ArenaCampaignProjectResult = {
+  project_id: string;
+  requested_iterations: number;
+  completed_iterations: number;
+  elapsed_ms: number;
+  stopped_reason: "completed" | "time_budget" | "no_episodes";
+  best_arm_id: string | null;
+  best_arm_score: number | null;
+  winner_current: string | null;
+};
+
+type ArenaCampaignResult = {
+  requested_projects: number;
+  processed_projects: number;
+  elapsed_ms: number;
+  stopped_reason: "completed" | "time_budget";
+  total_completed_iterations: number;
+  projects: ArenaCampaignProjectResult[];
 };
 
 const DEFAULT_ARMS: ArenaArm[] = [
@@ -445,6 +485,7 @@ async function recordArenaEvolutionEvent(
     actorId: string | null;
     projectId: string | null;
     changes: Record<string, unknown>;
+    description?: string;
   }
 ) {
   const now = new Date().toISOString();
@@ -459,7 +500,7 @@ async function recordArenaEvolutionEvent(
       input.tenantType,
       input.tenantId,
       input.projectId,
-      "memory_arena_run",
+      input.description || "memory_arena_run",
       JSON.stringify(input.changes || {}),
       now,
       input.actorId,
@@ -517,6 +558,7 @@ export async function runMemoryArena(db: Client, input: ArenaRunInput): Promise<
     ? input.sessionKinds.filter((k): k is SessionKind => k === "agent" || k === "agent_pro")
     : ["agent", "agent_pro"]) as SessionKind[];
   const includeOpenSessions = input.includeOpenSessions !== false;
+  const persistOutcome = input.persistOutcome !== false;
 
   const limitSessions = clampInt(input.limitSessions, 30, 1, 200);
   const limitEpisodes = clampInt(input.limitEpisodes, 80, 1, 400);
@@ -585,31 +627,33 @@ export async function runMemoryArena(db: Client, input: ArenaRunInput): Promise<
     },
   };
 
-  await recordArenaEvolutionEvent(db, {
-    tenantType: input.tenantType,
-    tenantId: input.tenantId,
-    actorId: input.actorId,
-    projectId,
-    changes: {
-      arena: output,
-      config: {
-        limit_sessions: limitSessions,
-        limit_episodes: limitEpisodes,
-        memory_limit: memoryLimit,
-        document_limit: documentLimit,
+  if (persistOutcome) {
+    await recordArenaEvolutionEvent(db, {
+      tenantType: input.tenantType,
+      tenantId: input.tenantId,
+      actorId: input.actorId,
+      projectId,
+      changes: {
+        arena: output,
+        config: {
+          limit_sessions: limitSessions,
+          limit_episodes: limitEpisodes,
+          memory_limit: memoryLimit,
+          document_limit: documentLimit,
+        },
       },
-    },
-  });
+    });
 
-  const selectedArmMetrics = armResults.find((a) => a.arm_id === output.selected_next) || null;
-  await upsertProjectRetrievalPolicy(db, {
-    tenantType: input.tenantType,
-    tenantId: input.tenantId,
-    actorId: input.actorId,
-    projectId,
-    selectedArmId: output.selected_next || output.winner_bandit || output.winner_current,
-    avgScore: selectedArmMetrics?.avg_score ?? armResults[0]?.avg_score ?? 0.5,
-  });
+    const selectedArmMetrics = armResults.find((a) => a.arm_id === output.selected_next) || null;
+    await upsertProjectRetrievalPolicy(db, {
+      tenantType: input.tenantType,
+      tenantId: input.tenantId,
+      actorId: input.actorId,
+      projectId,
+      selectedArmId: output.selected_next || output.winner_bandit || output.winner_current,
+      avgScore: selectedArmMetrics?.avg_score ?? armResults[0]?.avg_score ?? 0.5,
+    });
+  }
 
   return output;
 }
@@ -618,6 +662,7 @@ export async function runMemoryArenaIterations(db: Client, input: ArenaBatchRunI
   const requestedIterations = clampInt(input.iterations, 1, 1, 1000);
   const timeBudgetMs = clampInt(input.timeBudgetMs, 60_000, 1_000, 1_800_000);
   const stopWhenNoEpisodes = input.stopWhenNoEpisodes !== false;
+  const persistEachIteration = input.persistEachIteration === true;
 
   const startedAt = Date.now();
   const winnerCount = new Map<string, number>();
@@ -640,6 +685,7 @@ export async function runMemoryArenaIterations(db: Client, input: ArenaBatchRunI
       projectId: input.projectId,
       sessionKinds: input.sessionKinds,
       includeOpenSessions: input.includeOpenSessions,
+      persistOutcome: persistEachIteration,
       limitSessions: input.limitSessions,
       limitEpisodes: input.limitEpisodes,
       memoryLimit: input.memoryLimit,
@@ -673,6 +719,36 @@ export async function runMemoryArenaIterations(db: Client, input: ArenaBatchRunI
     .map(([arm_id, v]) => ({ arm_id, avg_score: v.n > 0 ? v.sum / v.n : 0 }))
     .sort((a, b) => b.avg_score - a.avg_score);
 
+  if (!persistEachIteration && completed > 0 && lastRun) {
+    await recordArenaEvolutionEvent(db, {
+      tenantType: input.tenantType,
+      tenantId: input.tenantId,
+      actorId: input.actorId,
+      projectId: input.projectId || null,
+      description: "memory_arena_run",
+      changes: {
+        arena: lastRun,
+        batch: {
+          requested_iterations: requestedIterations,
+          completed_iterations: completed,
+          elapsed_ms: Date.now() - startedAt,
+          stopped_reason: stoppedReason,
+          winner_tally,
+          average_scores,
+        },
+      },
+    });
+
+    await upsertProjectRetrievalPolicy(db, {
+      tenantType: input.tenantType,
+      tenantId: input.tenantId,
+      actorId: input.actorId,
+      projectId: input.projectId || null,
+      selectedArmId: average_scores[0]?.arm_id || lastRun.selected_next || lastRun.winner_bandit || lastRun.winner_current,
+      avgScore: average_scores[0]?.avg_score ?? 0.5,
+    });
+  }
+
   return {
     requested_iterations: requestedIterations,
     completed_iterations: completed,
@@ -681,5 +757,122 @@ export async function runMemoryArenaIterations(db: Client, input: ArenaBatchRunI
     winner_tally,
     average_scores,
     last_run: lastRun,
+  };
+}
+
+async function pickCampaignProjects(
+  db: Client,
+  input: {
+    tenantType: TenantType;
+    tenantId: string;
+    sessionKinds: SessionKind[];
+    maxProjects: number;
+  }
+): Promise<string[]> {
+  const fromSessions = (
+    await db.query(
+      `SELECT project_id, COUNT(*)::int AS session_count, MAX(started_at) AS last_started
+       FROM sessions
+       WHERE tenant_type = $1 AND tenant_id = $2
+         AND kind = ANY($3::text[])
+       GROUP BY project_id
+       ORDER BY last_started DESC NULLS LAST, session_count DESC
+       LIMIT $4`,
+      [input.tenantType, input.tenantId, input.sessionKinds, input.maxProjects]
+    )
+  ).rows
+    .map((r: any) => safeString(r.project_id))
+    .filter(Boolean);
+
+  if (fromSessions.length > 0) return fromSessions;
+
+  return (
+    await db.query(
+      `SELECT id
+       FROM projects
+       WHERE tenant_type = $1 AND tenant_id = $2
+       ORDER BY updated_at DESC
+       LIMIT $3`,
+      [input.tenantType, input.tenantId, input.maxProjects]
+    )
+  ).rows
+    .map((r: any) => safeString(r.id))
+    .filter(Boolean);
+}
+
+export async function runMemoryArenaCampaign(db: Client, input: ArenaCampaignInput): Promise<ArenaCampaignResult> {
+  const sessionKinds = (Array.isArray(input.sessionKinds) && input.sessionKinds.length
+    ? input.sessionKinds.filter((k): k is SessionKind => k === "agent" || k === "agent_pro")
+    : ["agent", "agent_pro"]) as SessionKind[];
+
+  const iterationsPerProject = clampInt(input.iterationsPerProject, 100, 1, 1000);
+  const maxProjects = clampInt(input.maxProjects, 8, 1, 100);
+  const timeBudgetMs = clampInt(input.timeBudgetMs, 300_000, 1_000, 1_800_000);
+
+  const requestedProjects =
+    Array.isArray(input.projectIds) && input.projectIds.length > 0
+      ? input.projectIds.map((p) => safeString(p)).filter(Boolean).slice(0, maxProjects)
+      : await pickCampaignProjects(db, {
+          tenantType: input.tenantType,
+          tenantId: input.tenantId,
+          sessionKinds,
+          maxProjects,
+        });
+
+  const startedAt = Date.now();
+  const projects: ArenaCampaignProjectResult[] = [];
+  let totalCompletedIterations = 0;
+  let stoppedReason: "completed" | "time_budget" = "completed";
+
+  for (const projectId of requestedProjects) {
+    const elapsed = Date.now() - startedAt;
+    const remainingMs = timeBudgetMs - elapsed;
+    if (remainingMs <= 1_000) {
+      stoppedReason = "time_budget";
+      break;
+    }
+
+    const batch = await runMemoryArenaIterations(db, {
+      tenantType: input.tenantType,
+      tenantId: input.tenantId,
+      actorId: input.actorId,
+      projectId,
+      sessionKinds,
+      includeOpenSessions: input.includeOpenSessions,
+      iterations: iterationsPerProject,
+      timeBudgetMs: remainingMs,
+      stopWhenNoEpisodes: input.stopWhenNoEpisodes,
+      persistEachIteration: input.persistEachIteration,
+      limitSessions: input.limitSessions,
+      limitEpisodes: input.limitEpisodes,
+      memoryLimit: input.memoryLimit,
+      documentLimit: input.documentLimit,
+    });
+
+    totalCompletedIterations += batch.completed_iterations;
+    projects.push({
+      project_id: projectId,
+      requested_iterations: batch.requested_iterations,
+      completed_iterations: batch.completed_iterations,
+      elapsed_ms: batch.elapsed_ms,
+      stopped_reason: batch.stopped_reason,
+      best_arm_id: batch.average_scores[0]?.arm_id || null,
+      best_arm_score: typeof batch.average_scores[0]?.avg_score === "number" ? batch.average_scores[0].avg_score : null,
+      winner_current: batch.last_run?.winner_current || null,
+    });
+
+    if (batch.stopped_reason === "time_budget") {
+      stoppedReason = "time_budget";
+      break;
+    }
+  }
+
+  return {
+    requested_projects: requestedProjects.length,
+    processed_projects: projects.length,
+    elapsed_ms: Date.now() - startedAt,
+    stopped_reason: stoppedReason,
+    total_completed_iterations: totalCompletedIterations,
+    projects,
   };
 }

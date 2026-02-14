@@ -116,6 +116,7 @@ pajama projects list
 pajama memories list --project-id <project-id>
 pajama assets upload --project-id <project-id> --path <file>
 pajama evolve arena-latest --project-id <project-id>
+pajama evolve arena-campaign --max-projects 10 --iterations-per-project 200 --time-budget-ms 600000
 ```
 
 Binary download prefix:

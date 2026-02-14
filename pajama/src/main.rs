@@ -300,6 +300,50 @@ enum EvolveCmd {
         #[arg(long)]
         json: bool,
     },
+
+    /// Run arena iterations across multiple projects in one campaign.
+    ArenaCampaign {
+        /// Optional project ids (repeat flag or comma-separated). If omitted, server auto-selects.
+        #[arg(long, value_delimiter = ',')]
+        project_id: Vec<String>,
+
+        #[arg(long, default_value_t = 100)]
+        iterations_per_project: u32,
+
+        #[arg(long, default_value_t = 8)]
+        max_projects: u32,
+
+        #[arg(long, default_value_t = 300000)]
+        time_budget_ms: u32,
+
+        /// Use only closed sessions (default includes open sessions too)
+        #[arg(long, default_value_t = false)]
+        closed_only: bool,
+
+        /// Continue iterations even if an iteration sees 0 episodes
+        #[arg(long, default_value_t = false)]
+        continue_when_empty: bool,
+
+        /// Persist every iteration event instead of one summarized outcome per project
+        #[arg(long, default_value_t = false)]
+        persist_each_iteration: bool,
+
+        #[arg(long, default_value_t = 30)]
+        limit_sessions: u32,
+
+        #[arg(long, default_value_t = 80)]
+        limit_episodes: u32,
+
+        #[arg(long, default_value_t = 16)]
+        memory_limit: u32,
+
+        #[arg(long, default_value_t = 8)]
+        document_limit: u32,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1038,6 +1082,116 @@ async fn handle_evolve(api: ApiClient, cmd: EvolveCmd) -> Result<()> {
             println!("elapsed_ms           {}", elapsed_ms);
             println!("stopped_reason       {}", stopped);
             println!("best_arm             {} ({:.6})", best_arm_id, best_score);
+        }
+        EvolveCmd::ArenaCampaign {
+            project_id,
+            iterations_per_project,
+            max_projects,
+            time_budget_ms,
+            closed_only,
+            continue_when_empty,
+            persist_each_iteration,
+            limit_sessions,
+            limit_episodes,
+            memory_limit,
+            document_limit,
+            json,
+        } => {
+            let project_ids: Vec<String> = project_id
+                .into_iter()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+            let payload = serde_json::json!({
+                "project_ids": if project_ids.is_empty() { serde_json::Value::Null } else { serde_json::json!(project_ids) },
+                "iterations_per_project": iterations_per_project,
+                "max_projects": max_projects,
+                "time_budget_ms": time_budget_ms,
+                "include_open_sessions": !closed_only,
+                "stop_when_no_episodes": !continue_when_empty,
+                "persist_each_iteration": persist_each_iteration,
+                "limit_sessions": limit_sessions,
+                "limit_episodes": limit_episodes,
+                "memory_limit": memory_limit,
+                "document_limit": document_limit
+            });
+
+            let res: serde_json::Value = api
+                .post_json("/api/evolve/memory-arena/campaign", &payload)
+                .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let campaign = res
+                .get("campaign")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            if campaign.is_null() {
+                println!("no campaign result");
+                return Ok(());
+            }
+
+            let requested_projects = campaign
+                .get("requested_projects")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let processed_projects = campaign
+                .get("processed_projects")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let total_completed_iterations = campaign
+                .get("total_completed_iterations")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let elapsed_ms = campaign
+                .get("elapsed_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let stopped_reason = campaign
+                .get("stopped_reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+
+            let best_project = campaign
+                .get("projects")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.iter().max_by(|a, b| {
+                    let sa = a
+                        .get("best_arm_score")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(-1.0);
+                    let sb = b
+                        .get("best_arm_score")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(-1.0);
+                    sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+                }))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+
+            println!("requested_projects        {}", requested_projects);
+            println!("processed_projects        {}", processed_projects);
+            println!("total_completed_iterations {}", total_completed_iterations);
+            println!("elapsed_ms                {}", elapsed_ms);
+            println!("stopped_reason            {}", stopped_reason);
+
+            if !best_project.is_null() {
+                let project = best_project
+                    .get("project_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let arm = best_project
+                    .get("best_arm_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let score = best_project
+                    .get("best_arm_score")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                println!("best_project             {} :: {} ({:.6})", project, arm, score);
+            }
         }
     }
 

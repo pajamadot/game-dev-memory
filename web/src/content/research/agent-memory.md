@@ -218,6 +218,7 @@ The API now includes a first RL-style evolution harness to compare retrieval org
 - Endpoint: `POST /api/evolve/memory-arena/run`
 - Snapshot: `GET /api/evolve/memory-arena/latest`
 - Batch iterations: `POST /api/evolve/memory-arena/iterate`
+- Campaign (multi-project): `POST /api/evolve/memory-arena/campaign`
 - Materialized policy: `GET /api/evolve/retrieval-policy?project_id=...`
 
 How it works:

@@ -101,6 +101,7 @@ pajama evolve policy --project-id <project-uuid>
 pajama evolve arena-latest --project-id <project-uuid>
 pajama evolve arena-run --project-id <project-uuid>
 pajama evolve arena-iterate --project-id <project-uuid> --iterations 300 --time-budget-ms 300000
+pajama evolve arena-campaign --max-projects 10 --iterations-per-project 200 --time-budget-ms 600000
 ```
 
 ## Evidence-First: Link Files To Memories
