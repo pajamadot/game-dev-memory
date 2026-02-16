@@ -31,6 +31,9 @@ test.describe("Public UX smoke", () => {
     await page.goto("/research/pageindex");
     await expect(page.getByRole("heading", { name: "PageIndex", exact: true })).toBeVisible();
 
+    await page.goto("/research/evermemos");
+    await expect(page.getByRole("heading", { name: "EverMemOS Adaptation", exact: true })).toBeVisible();
+
     await page.goto("/research/new-projects");
     await expect(
       page.getByRole("heading", { name: "New Projects Radar", exact: true })

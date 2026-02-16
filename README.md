@@ -8,7 +8,7 @@ This project is built around one core rule:
 - MCP is a thin compatibility layer on top.
 - Web, CLI, and agents all use the same API and data model.
 
-## Status Snapshot (February 14, 2026)
+## Status Snapshot (February 16, 2026)
 
 ### Production endpoints
 
@@ -19,9 +19,9 @@ This project is built around one core rule:
 
 ### Current release state
 
-- Worker/API latest deployed version: `0b64b801-77a3-4ad7-bc38-10db43ce5b38`
+- Worker/API latest deployed version: `db4b5abb-4565-4eb9-a9b7-8dce8edbbbfd`
 - CLI latest npm package: `@pajamadot/pajama@0.1.8`
-- Last end-to-end verification: February 14, 2026 (local build, local UX smoke, live smoke with authenticated checks)
+- Last end-to-end verification: February 16, 2026 (local build + Playwright e2e smoke)
 - CLI binary download prefix:
   - `https://api-game-dev-memory.pajamadot.com/downloads/pajama/v{version}/{file}`
 - DB backend: Neon Postgres via Cloudflare Hyperdrive
@@ -40,6 +40,8 @@ This project is built around one core rule:
 - Streaming agent sessions (`agent-pro`) backed by Cloudflare Sandbox.
 - Deterministic fallback answers when LLM synthesis fails or is unavailable.
 - Retrieval evolution arena with project policy materialization and campaign mode.
+- EverMemOS-inspired derivation pipeline (/api/memories/:id/derive) for event logs + foresight memories.
+- Time-aware foresight lane (/api/memories/foresight/active) for deadline/planning retrieval.
 - Daily research digests ingested into memory via cron.
 - Live end-to-end smoke suite for web/API/MCP/agent/CLI (Playwright + `npx @pajamadot/pajama`).
 
@@ -153,6 +155,7 @@ Primary research artifacts live in:
 - `research/agent-memory.md`
 - `research/ue-memory.md`
 - `research/pageindex.md`
+- `research/evermemos.md`
 - `research/new-projects.md`
 - `web/src/content/research/*` (published versions)
 
@@ -340,9 +343,10 @@ Migrations in `api/migrations/`:
 ### PageIndex-TS (`packages/pageindex-ts/`)
 
 - Worker-friendly TypeScript port inspired by `VectifyAI/PageIndex` (MIT).
-- Used to build hierarchical indexes for artifacts and enable “document node” retrieval without a vector DB.
+- Used to build hierarchical indexes for artifacts and enable “document node�?retrieval without a vector DB.
 - Research notes and port status:
   - `research/pageindex.md`
+- `research/evermemos.md`
   - `packages/pageindex-ts/PORT_STATUS.md`
 
 ### Research pipeline
@@ -471,3 +475,6 @@ Detailed runbook:
 - `docs/deployment.md`
 - `docs/e2e.md`
 - `docs/roadmap.md`
+
+
+

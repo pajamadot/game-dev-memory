@@ -14,6 +14,7 @@ import {
   type MemoryState,
 } from "../core/memories";
 import { batchGetMemories, listMemorySearchProviders, listMemoryTimeline, searchMemoryIndex } from "../core/memoryRetrieval";
+import { deriveMemoryPlan } from "../core/memoryDerivation";
 
 export const memoriesRouter = new Hono<AppEnv>();
 
@@ -50,6 +51,60 @@ function safeRelation(v: unknown): string {
   if (!s) return "related";
   // Keep relation strings small + predictable for future analytics.
   return s.slice(0, 64).replace(/[^a-zA-Z0-9._:-]/g, "_");
+}
+
+function parseJsonObject(v: unknown): Record<string, unknown> {
+  if (!v) return {};
+  if (typeof v === "object") return v as Record<string, unknown>;
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function normalizeTags(v: unknown): string[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.filter((t): t is string => typeof t === "string").slice(0, 64);
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (Array.isArray(parsed)) return parsed.filter((t): t is string => typeof t === "string").slice(0, 64);
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function uniqTags(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    const t = (v || "").trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+function shortText(v: unknown, max = 120): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (s.length <= max) return s;
+  return `${s.slice(0, max).trimEnd()}...`;
+}
+
+function parseIsoMs(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : null;
 }
 
 // List memories with optional filters
@@ -185,6 +240,232 @@ memoriesRouter.post("/batch-get", async (c) => {
   );
 
   return c.json(result);
+});
+
+// List active foresight memories (EverMemOS-inspired time-aware memory lane).
+memoriesRouter.get("/foresight/active", async (c) => {
+  const { tenantType, tenantId } = requireTenant(c);
+  const projectId = c.req.query("project_id") || null;
+  const search = (c.req.query("q") || c.req.query("query") || "").trim().toLowerCase();
+  const includeInactive = truthy(c.req.query("include_inactive") || c.req.query("all_states"));
+  const includePast = truthy(c.req.query("include_past"));
+  const stateParam = c.req.query("state") || null;
+  const withinDays = Math.min(Math.max(parseInt(c.req.query("within_days") || "60"), 1), 3650);
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50"), 1), 300);
+  const states = parseStates({ includeInactive, stateParam });
+
+  const rows = await withDbClient(c.env, async (db) =>
+    await listMemories(db, tenantType, tenantId, {
+      projectId,
+      category: "foresight",
+      states,
+      limit: Math.min(Math.max(limit * 4, limit), 500),
+      mode: "preview",
+      memoryMode: "fast",
+    })
+  );
+
+  const nowMs = Date.now();
+  const horizonMs = nowMs + withinDays * 24 * 60 * 60 * 1000;
+
+  const filtered = (rows || [])
+    .map((row: any) => {
+      const context = parseJsonObject(row?.context);
+      const dueRaw = context["end_time"] ?? context["due_at"] ?? context["deadline"];
+      const dueMs = parseIsoMs(dueRaw);
+      const dueIso = dueMs ? new Date(dueMs).toISOString() : null;
+      const dueInDays = dueMs ? Math.round((dueMs - nowMs) / (24 * 60 * 60 * 1000)) : null;
+      return {
+        ...row,
+        due_time: dueIso,
+        due_in_days: dueInDays,
+      };
+    })
+    .filter((row: any) => {
+      const hay = `${String(row?.title || "")}\n${String(row?.content || "")}`.toLowerCase();
+      if (search && !hay.includes(search)) return false;
+
+      const dueMs = row?.due_time ? Date.parse(String(row.due_time)) : NaN;
+      if (!Number.isFinite(dueMs)) return true;
+
+      if (!includePast && dueMs < nowMs) return false;
+      if (dueMs > horizonMs) return false;
+      return true;
+    })
+    .sort((a: any, b: any) => {
+      const aDue = a?.due_time ? Date.parse(String(a.due_time)) : Number.POSITIVE_INFINITY;
+      const bDue = b?.due_time ? Date.parse(String(b.due_time)) : Number.POSITIVE_INFINITY;
+      if (aDue !== bDue) return aDue - bDue;
+      return Date.parse(String(b?.updated_at || "")) - Date.parse(String(a?.updated_at || ""));
+    })
+    .slice(0, limit);
+
+  return c.json({
+    foresight: filtered,
+    meta: {
+      total: filtered.length,
+      within_days: withinDays,
+      include_past: includePast,
+    },
+  });
+});
+
+// Derive event_log + foresight memories from one source memory.
+memoriesRouter.post("/:id/derive", async (c) => {
+  const { tenantType, tenantId, actorId } = requireTenant(c);
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+  const dryRun = truthy(body.dry_run);
+  const createEventLogs = body.create_event_logs === false || body.no_event_logs === true ? false : true;
+  const createForesight = body.create_foresight === false || body.no_foresight === true ? false : true;
+  const maxEventLogs = Math.min(Math.max(parseInt(body.max_event_logs ?? "12"), 0), 50);
+  const maxForesight = Math.min(Math.max(parseInt(body.max_foresight ?? "6"), 0), 20);
+
+  const out = await withDbClient(c.env, async (db) => {
+    const parentRes = await db.query(
+      `SELECT id, project_id, session_id, category, source_type, title, content, tags, confidence
+       FROM memories
+       WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3`,
+      [id, tenantType, tenantId]
+    );
+    const parent = parentRes.rows[0] ?? null;
+    if (!parent) return { error: "not_found" as const };
+
+    const parentCategory = String(parent.category || "").toLowerCase();
+    if (parentCategory === "event_log" || parentCategory === "foresight") {
+      return { error: "unsupported_source" as const, category: parentCategory };
+    }
+
+    const nowIso = new Date().toISOString();
+    const plan = deriveMemoryPlan({
+      title: String(parent.title || ""),
+      content: String(parent.content || ""),
+      nowIso,
+      maxEventLogs,
+      maxForesight,
+    });
+
+    if (dryRun) {
+      return {
+        ok: true,
+        dry_run: true,
+        parent_memory_id: id,
+        created: { event_log: 0, foresight: 0 },
+        ids: { event_log: [] as string[], foresight: [] as string[] },
+        plan,
+      };
+    }
+
+    const baseTags = normalizeTags(parent.tags);
+    const eventLogIds: string[] = [];
+    const foresightIds: string[] = [];
+
+    const createDerivedLink = async (fromId: string, toId: string, metadata: Record<string, unknown>) => {
+      await db.query(
+        `INSERT INTO entity_links (
+           id, tenant_type, tenant_id,
+           from_type, from_id, to_type, to_id,
+           relation, metadata, created_at, created_by
+         )
+         VALUES ($1, $2, $3, 'memory', $4::uuid, 'memory', $5::uuid, 'derived_from', $6::jsonb, $7, $8)`,
+        [crypto.randomUUID(), tenantType, tenantId, fromId, toId, JSON.stringify(metadata), nowIso, actorId]
+      );
+    };
+
+    if (createEventLogs) {
+      for (const item of plan.event_logs) {
+        const childId = crypto.randomUUID();
+        await createMemory(db, {
+          tenantType,
+          tenantId,
+          actorId,
+          id: childId,
+          projectId: String(parent.project_id),
+          sessionId: parent.session_id ? String(parent.session_id) : null,
+          category: "event_log",
+          sourceType: "derived",
+          title: `Event: ${shortText(item.text, 90)}`,
+          content: item.text,
+          tags: uniqTags([...baseTags, "derived", "event_log", "evermemos"]),
+          context: {
+            derived: {
+              framework: "evermemos-inspired",
+              type: "event_log",
+              parent_memory_id: id,
+              parent_category: parentCategory,
+              parent_source_type: String(parent.source_type || "manual"),
+            },
+            evidence: item.evidence,
+            confidence_hint: item.confidence,
+          },
+          confidence: item.confidence,
+          nowIso,
+        });
+        await createDerivedLink(childId, id, { type: "event_log", framework: "evermemos-inspired" });
+        eventLogIds.push(childId);
+      }
+    }
+
+    if (createForesight) {
+      for (const item of plan.foresight) {
+        const childId = crypto.randomUUID();
+        await createMemory(db, {
+          tenantType,
+          tenantId,
+          actorId,
+          id: childId,
+          projectId: String(parent.project_id),
+          sessionId: parent.session_id ? String(parent.session_id) : null,
+          category: "foresight",
+          sourceType: "derived",
+          title: `Foresight: ${shortText(item.text, 90)}`,
+          content: item.text,
+          tags: uniqTags([...baseTags, "derived", "foresight", "evermemos"]),
+          context: {
+            derived: {
+              framework: "evermemos-inspired",
+              type: "foresight",
+              parent_memory_id: id,
+              parent_category: parentCategory,
+              parent_source_type: String(parent.source_type || "manual"),
+            },
+            evidence: item.evidence,
+            start_time: item.start_time,
+            end_time: item.end_time,
+            due_kind: item.due_kind,
+            confidence_hint: item.confidence,
+          },
+          confidence: item.confidence,
+          nowIso,
+        });
+        await createDerivedLink(childId, id, { type: "foresight", framework: "evermemos-inspired" });
+        foresightIds.push(childId);
+      }
+    }
+
+    return {
+      ok: true,
+      dry_run: false,
+      parent_memory_id: id,
+      created: { event_log: eventLogIds.length, foresight: foresightIds.length },
+      ids: { event_log: eventLogIds, foresight: foresightIds },
+      plan,
+    };
+  });
+
+  if ((out as any)?.error === "not_found") return c.json({ ok: false, error: "Memory not found" }, 404);
+  if ((out as any)?.error === "unsupported_source") {
+    return c.json(
+      {
+        ok: false,
+        error: "Cannot derive from already-derived memory category",
+        category: (out as any)?.category,
+      },
+      400
+    );
+  }
+
+  return c.json(out);
 });
 
 // Get single memory
@@ -528,3 +809,5 @@ memoriesRouter.get("/:id/events", async (c) => {
   if (!events) return c.json({ error: "Memory not found" }, 404);
   return c.json({ events });
 });
+
+

@@ -48,6 +48,14 @@ export default function ResearchIndexPage() {
           </Link>
 
           <Link
+            href="/research/evermemos"
+            className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur hover:bg-white"
+          >
+            <p className="text-sm font-semibold text-zinc-950">EverMemOS Adaptation</p>
+            <p className="mt-1 text-sm text-zinc-600">Structured event-log + foresight derivation for long-term agent memory.</p>
+          </Link>
+
+          <Link
             href="/research/new-projects"
             className="rounded-3xl border border-zinc-200/70 bg-white/70 p-6 shadow-sm backdrop-blur hover:bg-white"
           >
