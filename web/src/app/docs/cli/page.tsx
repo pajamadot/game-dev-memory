@@ -53,6 +53,10 @@ function llmBootstrapSnippet(): string {
     "# Evidence files (R2 assets): upload + link to memory",
     "pajama assets upload --project-id <project-uuid> --path \"C:\\\\tmp\\\\build.zip\"",
     "pajama assets upload --project-id <project-uuid> --memory-id <memory-uuid> --path \"C:\\\\tmp\\\\Saved\\\\Logs\\\\MyProject.log\"",
+    "",
+    "# Agent diagnostics + cache tuning",
+    "pajama agent ask --project-id <project-uuid> --query \"summarize recent build regressions\" --dry-run --diagnostics",
+    "pajama agent ask --project-id <project-uuid> --query \"summarize recent build regressions\" --dry-run --diagnostics --no-cache",
     "```",
     "",
     "## Install Agent Skill: pajama-cli (Codex / Claude Code)",
@@ -247,4 +251,3 @@ pajama projects list
     </div>
   );
 }
-

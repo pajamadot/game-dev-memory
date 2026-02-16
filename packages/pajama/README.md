@@ -43,9 +43,15 @@ pajama evolve arena-campaign --max-projects 10 --iterations-per-project 200 --ti
 
 # Ask the memory agent
 pajama agent status
-pajama agent ask --project-id <project-uuid> --query "summarize latest build failures"
+pajama agent ask --project-id <project-uuid> --query "summarize latest build failures"`r`npajama agent ask --project-id <project-uuid> --query "summarize latest build failures" --dry-run --diagnostics`r`npajama agent ask --project-id <project-uuid> --query "summarize latest build failures" --dry-run --diagnostics --no-cache
 ```
 
+
+Benchmark helper (live API):
+
+```powershell
+./scripts/benchmark-agent-retrieval.ps1 -Token "<gdm_api_key>" -ProjectId "<project-uuid>" -Iterations 12
+```
 ## Environment Variables
 
 - `PAJAMA_API_URL`: Memory API base URL (defaults to `https://api-game-dev-memory.pajamadot.com`)
@@ -78,4 +84,3 @@ If the binary is missing after install:
 - Ensure npm scripts are enabled (`npm config get ignore-scripts` should be `false`)
 - Re-run install scripts: `npm rebuild -g @pajamadot/pajama`
 - Or just run `pajama --version` (the launcher will attempt an on-demand install)
-

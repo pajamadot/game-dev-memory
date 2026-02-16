@@ -120,6 +120,34 @@ test.describe("Live API/MCP smoke", () => {
     expect(j.providers.map((p: any) => p.id)).toContain("memories_fts");
   });
 
+  test("Agent ask diagnostics works (if token present)", async ({ request }) => {
+    test.skip(!apiToken, "Set E2E_API_TOKEN to run authenticated live tests.");
+
+    const res = await request.post(`${apiOrigin}/api/agent/ask`, {
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        authorization: `Bearer ${apiToken}`,
+      },
+      data: {
+        query: "latency diagnostics smoke",
+        dry_run: true,
+        include_diagnostics: true,
+        no_cache: false,
+        cache_ttl_ms: 15000,
+        limit: 5,
+        document_limit: 0,
+      },
+    });
+
+    expect(res.status()).toBe(200);
+    const j = await res.json();
+    expect(j.ok).toBeTruthy();
+    expect(j.diagnostics).toBeTruthy();
+    expect(typeof j.diagnostics.cache.enabled).toBe("boolean");
+    expect(typeof j.diagnostics.cache.retrieval).toBe("string");
+    expect(typeof j.diagnostics.timings_ms.total).toBe("number");
+  });
   test("MCP tools/list works (if token present)", async ({ request }) => {
     test.skip(!apiToken, "Set E2E_API_TOKEN to run authenticated live tests.");
 
@@ -146,5 +174,3 @@ test.describe("Live API/MCP smoke", () => {
     expect(toolNames).toContain("memories.foresight_active");
   });
 });
-
-

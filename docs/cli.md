@@ -78,9 +78,23 @@ pajama evolve arena-campaign --max-projects 10 --iterations-per-project 200 --ti
 
 # Agent (retrieval-first ask)
 pajama agent status
-pajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?"
+pajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?"`r`npajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?" --dry-run --diagnostics`r`npajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?" --dry-run --diagnostics --no-cache
 ```
 
+
+## Retrieval Benchmark Script
+
+For live performance tuning, run the benchmark helper against the deployed API:
+
+```powershell
+./scripts/benchmark-agent-retrieval.ps1 -Token "<gdm_api_key>" -ProjectId "<project-uuid>" -Iterations 12
+```
+
+Useful switches:
+
+- `-NoCache` to measure cold-path retrieval latency.
+- `-MemoryMode fast|balanced|deep` to compare retrieval profiles.
+- `-RetrievalMode auto|memories|hybrid|documents` to compare routing policy.
 ## Automation
 
 You can override config values without re-login:
@@ -94,4 +108,3 @@ Or pass a token explicitly:
 ```powershell
 pajama --token gdm_... projects list
 ```
-

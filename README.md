@@ -20,7 +20,7 @@ This project is built around one core rule:
 ### Current release state
 
 - Worker/API latest deployed version: `e69d4774-32f3-400f-81a2-ea20afd2b586`
-- CLI latest npm package: `@pajamadot/pajama@0.1.9`
+- CLI latest npm package: `@pajamadot/pajama@0.1.10`
 - Last end-to-end verification: February 16, 2026 (local build + Playwright e2e smoke)
 - CLI binary download prefix:
   - `https://api-game-dev-memory.pajamadot.com/downloads/pajama/v{version}/{file}`
@@ -125,7 +125,7 @@ pajama assets upload --project-id "<project_uuid>" --path "C:\\logs\\build.zip" 
 ### Ask the agent (retrieval-first)
 
 ```powershell
-pajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run
+pajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run`r`npajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run --diagnostics
 ```
 
 Remove `--dry-run` to request synthesis when LLM is configured on the Worker.
@@ -343,7 +343,7 @@ Migrations in `api/migrations/`:
 ### PageIndex-TS (`packages/pageindex-ts/`)
 
 - Worker-friendly TypeScript port inspired by `VectifyAI/PageIndex` (MIT).
-- Used to build hierarchical indexes for artifacts and enable “document node�?retrieval without a vector DB.
+- Used to build hierarchical indexes for artifacts and enable 鈥渄ocument node鈥?retrieval without a vector DB.
 - Research notes and port status:
   - `research/pageindex.md`
 - `research/evermemos.md`
@@ -404,7 +404,7 @@ Migrations in `api/migrations/`:
 - Additional indexes added for session/memory/evolution hot paths.
 - Arena campaign mode supports bounded multi-project evaluation.
 - Asset multipart path enforces part sizing and max part count safety.
-- Agent routes now include deterministic fallback synthesis to avoid empty conversation responses.
+- Agent routes include deterministic fallback synthesis to avoid empty conversation responses.`r`n- Worker-side ephemeral retrieval caches now reduce repeated query latency (tenant/project/query scoped).`r`n- `/api/agent/ask` exposes optional `diagnostics` payload (cache hit state + stage timings) for live tuning.`r`n- Use `./scripts/benchmark-agent-retrieval.ps1` to compare cache on/off and retrieval mode latency against production.
 
 ## Security and Compliance Posture
 
@@ -475,8 +475,3 @@ Detailed runbook:
 - `docs/deployment.md`
 - `docs/e2e.md`
 - `docs/roadmap.md`
-
-
-
-
-

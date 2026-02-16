@@ -111,9 +111,23 @@ pajama evolve arena-campaign --max-projects 10 --iterations-per-project 200 --ti
 
 # Agent (retrieval-first)
 pajama agent status
-pajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?"
+pajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?"`r`npajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?" --dry-run --diagnostics`r`npajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?" --dry-run --diagnostics --no-cache
 ```
 
+
+## Benchmark Retrieval Latency
+
+Use the benchmark helper to compare retrieval profiles and cache behavior against the live API:
+
+```powershell
+./scripts/benchmark-agent-retrieval.ps1 -Token "<gdm_api_key>" -ProjectId "<project-uuid>" -Iterations 12
+```
+
+Common tuning switches:
+
+- `-NoCache` for cold-path latency.
+- `-MemoryMode fast|balanced|deep` for recall/latency tradeoffs.
+- `-RetrievalMode auto|memories|hybrid|documents` for routing comparisons.
 ## Evidence-First: Link Files To Memories
 
 Create a memory first:
@@ -201,4 +215,3 @@ cp -R "$tmp/gdm/skills/pajama-cli/"* "$CODEX_HOME/skills/pajama-cli/"
 ```
 
 After install, you can tell your agent to use the `pajama-cli` skill to record memories and attach evidence files (assets) during sessions.
-

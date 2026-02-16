@@ -1,6 +1,6 @@
 {
   "name": "@pajamadot/pajama",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "PajamaDot CLI for Game Dev Memory (prebuilt binary installer)",
   "private": false,
   "license": "UNLICENSED",
@@ -33,5 +33,3 @@
     "node": ">=18"
   }
 }
-
-

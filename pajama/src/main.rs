@@ -519,6 +519,18 @@ enum AgentCmd {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
 
+        /// Include diagnostics block (cache and timing stats)
+        #[arg(long, default_value_t = false)]
+        diagnostics: bool,
+
+        /// Disable worker-side retrieval cache for this request
+        #[arg(long, default_value_t = false)]
+        no_cache: bool,
+
+        /// Override retrieval cache TTL in milliseconds (1000..120000)
+        #[arg(long)]
+        cache_ttl_ms: Option<u32>,
+
         /// Output raw JSON
         #[arg(long)]
         json: bool,
@@ -1735,6 +1747,9 @@ async fn handle_agent(api: ApiClient, cmd: AgentCmd) -> Result<()> {
             memory_mode,
             retrieval_mode,
             dry_run,
+            diagnostics,
+            no_cache,
+            cache_ttl_ms,
             json,
         } => {
             let payload = serde_json::json!({
@@ -1746,7 +1761,10 @@ async fn handle_agent(api: ApiClient, cmd: AgentCmd) -> Result<()> {
                 "retrieval_mode": retrieval_mode,
                 "include_assets": true,
                 "include_documents": true,
-                "dry_run": dry_run
+                "dry_run": dry_run,
+                "include_diagnostics": diagnostics,
+                "no_cache": no_cache,
+                "cache_ttl_ms": cache_ttl_ms
             });
 
             let res: serde_json::Value = api.post_json("/api/agent/ask", &payload).await?;
@@ -1784,6 +1802,51 @@ async fn handle_agent(api: ApiClient, cmd: AgentCmd) -> Result<()> {
                 "evidence         {} memories, {} documents",
                 memory_count, doc_count
             );
+
+            if diagnostics {
+                if let Some(diag) = res.get("diagnostics") {
+                    let cache_enabled = diag
+                        .get("cache")
+                        .and_then(|v| v.get("enabled"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let cache_retrieval = diag
+                        .get("cache")
+                        .and_then(|v| v.get("retrieval"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    let cache_plan = diag
+                        .get("cache")
+                        .and_then(|v| v.get("plan"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    let cache_arena = diag
+                        .get("cache")
+                        .and_then(|v| v.get("arena"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+
+                    let timings = diag.get("timings_ms").unwrap_or(&serde_json::Value::Null);
+                    let as_ms = |k: &str| -> i64 {
+                        timings
+                            .get(k)
+                            .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)))
+                            .unwrap_or(-1)
+                    };
+
+                    println!(
+                        "diagnostics      cache={} retrieval={} plan={} arena={} total={}ms retrieval={}ms synthesis={}ms",
+                        cache_enabled,
+                        cache_retrieval,
+                        cache_plan,
+                        cache_arena,
+                        as_ms("total"),
+                        as_ms("retrieval"),
+                        as_ms("synthesis")
+                    );
+                }
+            }
+
             println!();
             println!("{}", answer);
 

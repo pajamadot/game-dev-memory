@@ -227,5 +227,24 @@ Invoke-RestMethod "$api/api/evolve/memory-arena/campaign" -Method Post -Headers 
 
 Notes:
 
-- Agent routes are retrieval-first and now include deterministic fallback synthesis when LLM output is unavailable, so callers receive a usable `answer` payload.
+- Agent routes are retrieval-first and include deterministic fallback synthesis when LLM output is unavailable, so callers still receive a usable `answer` payload.
 - `dry_run=true` keeps retrieval-only semantics and does not persist assistant messages.
+- `POST /api/agent/ask` now supports latency diagnostics and cache controls:
+  - `include_diagnostics` (boolean): include `diagnostics.cache` and `diagnostics.timings_ms` in response.
+  - `no_cache` (boolean): bypass worker-side ephemeral retrieval caches for this request.
+  - `cache_ttl_ms` (number): override retrieval cache TTL (1000..120000 ms) per request.
+
+Example diagnostics request:
+
+```powershell
+$body = @{
+  query = "why are cook failures increasing"
+  project_id = "<project-uuid>"
+  dry_run = $true
+  include_diagnostics = $true
+  no_cache = $false
+  cache_ttl_ms = 20000
+} | ConvertTo-Json
+
+Invoke-RestMethod "$api/api/agent/ask" -Method Post -Headers $h -ContentType "application/json" -Body $body
+```

@@ -7,6 +7,7 @@ import { anthropicMessages } from "../agent/anthropic";
 import { retrievePageIndexEvidence, type PageIndexEvidence } from "../agent/pageindex";
 import { heuristicRetrievalPlan, llmRetrievalPlan, type RetrievalPlan } from "../agent/retrievalPlanner";
 import { getLatestArenaRecommendation, type ArenaRecommendation } from "../evolve/arenaPolicy";
+import { EphemeralTtlCache, stableJsonStringify } from "../core/ephemeralCache";
 
 function clampInt(v: unknown, fallback: number, min: number, max: number): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v) : NaN;
@@ -149,6 +150,56 @@ function summarizeMemory(m: any): MemorySummary {
   };
 }
 
+type CacheState = "hit" | "miss" | "skip";
+
+type AskRetrievalSnapshot = {
+  retrieved: MemorySummary[];
+  assets_index: Record<string, AssetSummary[]>;
+  documents: DocumentEvidence[];
+  resolvedMemoryMode: MemorySearchMode;
+  resolvedRetrievalPlan: RetrievalPlan;
+  arenaRecommendation: ArenaRecommendation | null;
+};
+
+const RETRIEVAL_CACHE_DEFAULT_TTL_MS = 20_000;
+const RETRIEVAL_CACHE_MAX_TTL_MS = 120_000;
+const RETRIEVAL_PLAN_CACHE_TTL_MS = 60_000;
+const ARENA_RECOMMENDATION_CACHE_TTL_MS = 15_000;
+
+const askRetrievalCache = new EphemeralTtlCache<string, AskRetrievalSnapshot>(256);
+const retrievalPlanCache = new EphemeralTtlCache<string, RetrievalPlan>(512);
+const arenaRecommendationCache = new EphemeralTtlCache<string, ArenaRecommendation | null>(512);
+
+function normalizeQueryForCache(query: string): string {
+  return query.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function parseCacheTtlMs(v: unknown): number {
+  return clampInt(v, RETRIEVAL_CACHE_DEFAULT_TTL_MS, 1_000, RETRIEVAL_CACHE_MAX_TTL_MS);
+}
+
+function cloneAskRetrievalSnapshot(input: AskRetrievalSnapshot): AskRetrievalSnapshot {
+  const retrieved = input.retrieved.map((m) => ({ ...m, tags: [...(m.tags || [])] }));
+  const assets_index: Record<string, AssetSummary[]> = {};
+  for (const [memoryId, assets] of Object.entries(input.assets_index || {})) {
+    assets_index[memoryId] = (assets || []).map((a) => ({ ...a }));
+  }
+  const documents = (input.documents || []).map((d) => ({ ...d, path: [...(d.path || [])] }));
+
+  return {
+    retrieved,
+    assets_index,
+    documents,
+    resolvedMemoryMode: input.resolvedMemoryMode,
+    resolvedRetrievalPlan: {
+      mode: input.resolvedRetrievalPlan.mode,
+      strategies: [...(input.resolvedRetrievalPlan.strategies || [])],
+      reason: input.resolvedRetrievalPlan.reason,
+    },
+    arenaRecommendation: input.arenaRecommendation ? { ...input.arenaRecommendation } : null,
+  };
+}
+
 export const agentRouter = new Hono<AppEnv>();
 
 agentRouter.get("/status", async (c) => {
@@ -169,6 +220,15 @@ agentRouter.get("/status", async (c) => {
 //
 // This is intentionally deterministic unless an LLM provider is configured.
 agentRouter.post("/ask", async (c) => {
+  const startedAt = Date.now();
+  const timingsMs = { plan: 0, retrieval: 0, synthesis: 0, total: 0 };
+  const cacheState: { enabled: boolean; retrieval: CacheState; plan: CacheState; arena: CacheState } = {
+    enabled: true,
+    retrieval: "skip",
+    plan: "skip",
+    arena: "skip",
+  };
+
   const { tenantType, tenantId } = requireTenant(c);
   const body = await c.req.json().catch(() => ({}));
 
@@ -177,18 +237,23 @@ agentRouter.post("/ask", async (c) => {
 
   const projectId = asString(body.project_id || body.projectId).trim() || null;
   const limit = clampInt(body.limit, 12, 1, 50);
-  const includeAssets = Boolean(body.include_assets ?? true);
-  const includeDocuments = Boolean(body.include_documents ?? body.include_docs ?? true);
+  const includeAssets = truthy(body.include_assets ?? true);
+  const includeDocuments = truthy(body.include_documents ?? body.include_docs ?? true);
   const documentLimit = clampInt(body.document_limit, 8, 0, 50);
   const memoryModeRaw = body.memory_mode ?? body.memoryMode ?? body.search_mode ?? body.searchMode;
   const autoMemoryMode = isAutoMemoryMode(memoryModeRaw);
   const requestedMemoryMode = normalizeMemoryMode(memoryModeRaw);
   const retrievalMode = asString(body.retrieval_mode || body.retrievalMode || body.mode).trim().toLowerCase() || "auto";
+  const dryRun = truthy(body.dry_run ?? false);
 
-  const dryRun = Boolean(body.dry_run ?? false);
+  const includeDiagnostics = truthy(body.include_diagnostics ?? body.diagnostics ?? body.debug ?? false);
+  const disableCache = truthy(body.no_cache ?? body.cache_disabled ?? false);
+  const retrievalCacheTtlMs = parseCacheTtlMs(body.cache_ttl_ms);
+  cacheState.enabled = !disableCache;
 
   const allowDocuments = Boolean(projectId && includeDocuments && documentLimit > 0);
 
+  const planStartedAt = Date.now();
   let retrieval_plan: RetrievalPlan = heuristicRetrievalPlan(query, { allowDocuments });
   if (retrievalMode === "memories" || retrievalMode === "memories_only") {
     retrieval_plan = { mode: "manual", strategies: ["memories_fts"], reason: "Manual override: memories only." };
@@ -201,18 +266,96 @@ agentRouter.post("/ask", async (c) => {
       ? { mode: "manual", strategies: ["memories_fts", "pageindex_artifacts"], reason: "Manual override: hybrid retrieval." }
       : heuristicRetrievalPlan(query, { allowDocuments });
   } else if (retrievalMode === "llm" && !dryRun && c.env.ANTHROPIC_API_KEY) {
-    retrieval_plan = await llmRetrievalPlan(c.env as any, query, { allowDocuments });
+    const planCacheKey = stableJsonStringify({
+      type: "agent:retrieval-plan",
+      tenantType,
+      tenantId,
+      allowDocuments,
+      query: normalizeQueryForCache(query),
+    });
+
+    if (cacheState.enabled) {
+      const cachedPlan = retrievalPlanCache.get(planCacheKey);
+      if (cachedPlan) {
+        retrieval_plan = {
+          mode: cachedPlan.mode,
+          strategies: [...cachedPlan.strategies],
+          reason: cachedPlan.reason,
+        };
+        cacheState.plan = "hit";
+      } else {
+        retrieval_plan = await llmRetrievalPlan(c.env as any, query, { allowDocuments });
+        retrievalPlanCache.set(
+          planCacheKey,
+          {
+            mode: retrieval_plan.mode,
+            strategies: [...retrieval_plan.strategies],
+            reason: retrieval_plan.reason,
+          },
+          RETRIEVAL_PLAN_CACHE_TTL_MS
+        );
+        cacheState.plan = "miss";
+      }
+    } else {
+      retrieval_plan = await llmRetrievalPlan(c.env as any, query, { allowDocuments });
+      cacheState.plan = "skip";
+    }
+  }
+  timingsMs.plan = Date.now() - planStartedAt;
+
+  const retrievalStartedAt = Date.now();
+  const retrievalCacheKey = stableJsonStringify({
+    type: "agent:ask:retrieval",
+    tenantType,
+    tenantId,
+    projectId,
+    query: normalizeQueryForCache(query),
+    limit,
+    includeAssets,
+    includeDocuments,
+    documentLimit,
+    retrievalMode,
+    autoMemoryMode,
+    requestedMemoryMode,
+    strategies: retrieval_plan.strategies,
+  });
+
+  let retrievalSnapshot: AskRetrievalSnapshot | null = null;
+  if (cacheState.enabled) {
+    const cached = askRetrievalCache.get(retrievalCacheKey);
+    if (cached) {
+      retrievalSnapshot = cloneAskRetrievalSnapshot(cached);
+      cacheState.retrieval = "hit";
+      if (projectId && (autoMemoryMode || retrievalMode === "auto")) cacheState.arena = "hit";
+    } else {
+      cacheState.retrieval = "miss";
+    }
   }
 
-  const { memories, assetsByMemoryId, documents, resolvedMemoryMode, resolvedRetrievalPlan, arenaRecommendation } = await withDbClient(
-    c.env,
-    async (db) => {
+  if (!retrievalSnapshot) {
+    retrievalSnapshot = await withDbClient(c.env, async (db) => {
       let resolvedMemoryMode: MemorySearchMode = requestedMemoryMode;
       let resolvedRetrievalPlan: RetrievalPlan = retrieval_plan;
       let arenaRecommendation: ArenaRecommendation | null = null;
 
       if (projectId && (autoMemoryMode || retrievalMode === "auto")) {
-        arenaRecommendation = await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId });
+        const arenaCacheKey = stableJsonStringify({ type: "agent:arena", tenantType, tenantId, projectId });
+
+        if (cacheState.enabled) {
+          const cachedArena = arenaRecommendationCache.get(arenaCacheKey);
+          if (cachedArena !== undefined) {
+            arenaRecommendation = cachedArena;
+            cacheState.arena = "hit";
+          } else {
+            arenaRecommendation = await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId });
+            arenaRecommendationCache.set(arenaCacheKey, arenaRecommendation ?? null, ARENA_RECOMMENDATION_CACHE_TTL_MS);
+            cacheState.arena = "miss";
+          }
+        } else {
+          arenaRecommendation = await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId });
+          cacheState.arena = "skip";
+        }
+
         if (arenaRecommendation) {
           if (autoMemoryMode) {
             resolvedMemoryMode = arenaRecommendation.memory_mode;
@@ -225,85 +368,101 @@ agentRouter.post("/ask", async (c) => {
 
       const useMemorySearch = resolvedRetrievalPlan.strategies.includes("memories_fts");
 
-    const memRows = useMemorySearch
-      ? await listMemories(db, tenantType, tenantId, {
-          projectId,
-          search: query,
-          limit,
-          mode: "retrieval",
-          memoryMode: resolvedMemoryMode,
-          excludeCategoryPrefixes: ["agent_"],
-        })
-      : [];
+      const memRows = useMemorySearch
+        ? await listMemories(db, tenantType, tenantId, {
+            projectId,
+            search: query,
+            limit,
+            mode: "retrieval",
+            memoryMode: resolvedMemoryMode,
+            excludeCategoryPrefixes: ["agent_"],
+          })
+        : [];
 
-    const memIds = memRows.map((m: any) => String(m.id));
-    const assetsByMemoryId = new Map<string, AssetSummary[]>();
+      const retrieved = memRows.map(summarizeMemory);
+      const memIds = retrieved.map((m) => m.id);
 
-    if (includeAssets && memIds.length > 0) {
-      const { rows } = await db.query(
-        `SELECT
-           l.from_id AS memory_id,
-           a.id,
-           a.project_id,
-           a.status,
-           a.content_type,
-           a.byte_size,
-           a.original_name,
-           a.created_at
-         FROM entity_links l
-         JOIN assets a
-           ON a.tenant_type = l.tenant_type
-          AND a.tenant_id = l.tenant_id
-          AND a.id = l.to_id
-         WHERE l.tenant_type = $1 AND l.tenant_id = $2
-           AND l.from_type = 'memory'
-           AND l.to_type = 'asset'
-           AND l.from_id = ANY($3::uuid[])
-         ORDER BY a.created_at DESC`,
-        [tenantType, tenantId, memIds]
-      );
+      const assetsByMemoryId = new Map<string, AssetSummary[]>();
+      if (includeAssets && memIds.length > 0) {
+        const { rows } = await db.query(
+          `SELECT
+             l.from_id AS memory_id,
+             a.id,
+             a.project_id,
+             a.status,
+             a.content_type,
+             a.byte_size,
+             a.original_name,
+             a.created_at
+           FROM entity_links l
+           JOIN assets a
+             ON a.tenant_type = l.tenant_type
+            AND a.tenant_id = l.tenant_id
+            AND a.id = l.to_id
+           WHERE l.tenant_type = $1 AND l.tenant_id = $2
+             AND l.from_type = 'memory'
+             AND l.to_type = 'asset'
+             AND l.from_id = ANY($3::uuid[])
+           ORDER BY a.created_at DESC`,
+          [tenantType, tenantId, memIds]
+        );
 
-      for (const r of rows) {
-        const mid = String((r as any).memory_id);
-        const arr = assetsByMemoryId.get(mid) || [];
-        arr.push({
-          id: String((r as any).id),
-          project_id: String((r as any).project_id),
-          status: String((r as any).status),
-          content_type: String((r as any).content_type),
-          byte_size: Number((r as any).byte_size || 0),
-          original_name: (r as any).original_name ? String((r as any).original_name) : null,
-          created_at: String((r as any).created_at || ""),
-        });
-        assetsByMemoryId.set(mid, arr);
+        for (const r of rows) {
+          const mid = String((r as any).memory_id);
+          const arr = assetsByMemoryId.get(mid) || [];
+          arr.push({
+            id: String((r as any).id),
+            project_id: String((r as any).project_id),
+            status: String((r as any).status),
+            content_type: String((r as any).content_type),
+            byte_size: Number((r as any).byte_size || 0),
+            original_name: (r as any).original_name ? String((r as any).original_name) : null,
+            created_at: String((r as any).created_at || ""),
+          });
+          assetsByMemoryId.set(mid, arr);
+        }
       }
+
+      let documents: DocumentEvidence[] = [];
+      if (projectId && includeDocuments && documentLimit > 0 && resolvedRetrievalPlan.strategies.includes("pageindex_artifacts")) {
+        documents = await retrievePageIndexEvidence(db, tenantType, tenantId, {
+          projectId,
+          query,
+          limit: documentLimit,
+        });
+      }
+
+      const assets_index: Record<string, AssetSummary[]> = {};
+      for (const m of retrieved) {
+        const assets = assetsByMemoryId.get(m.id) || [];
+        if (assets.length) assets_index[m.id] = assets;
+      }
+
+      return {
+        retrieved,
+        assets_index,
+        documents,
+        resolvedMemoryMode,
+        resolvedRetrievalPlan,
+        arenaRecommendation,
+      };
+    });
+
+    if (cacheState.enabled && cacheState.retrieval === "miss") {
+      askRetrievalCache.set(retrievalCacheKey, cloneAskRetrievalSnapshot(retrievalSnapshot), retrievalCacheTtlMs);
     }
-
-    let documents: DocumentEvidence[] = [];
-    if (projectId && includeDocuments && documentLimit > 0 && resolvedRetrievalPlan.strategies.includes("pageindex_artifacts")) {
-      documents = await retrievePageIndexEvidence(db, tenantType, tenantId, {
-        projectId,
-        query,
-        limit: documentLimit,
-      });
-    }
-
-      return { memories: memRows, assetsByMemoryId, documents, resolvedMemoryMode, resolvedRetrievalPlan, arenaRecommendation };
-    }
-  );
-
-  const memoryMode = resolvedMemoryMode;
-  retrieval_plan = resolvedRetrievalPlan;
-
-  const retrieved = memories.map(summarizeMemory);
-  const assets_index: Record<string, AssetSummary[]> = {};
-  for (const m of retrieved) {
-    const assets = assetsByMemoryId.get(m.id) || [];
-    if (assets.length) assets_index[m.id] = assets;
   }
 
-  const retrievedDocs = documents || [];
+  timingsMs.retrieval = Date.now() - retrievalStartedAt;
 
+  const memoryMode = retrievalSnapshot.resolvedMemoryMode;
+  retrieval_plan = retrievalSnapshot.resolvedRetrievalPlan;
+  const arenaRecommendation = retrievalSnapshot.arenaRecommendation;
+  const retrieved = retrievalSnapshot.retrieved;
+  const assets_index = retrievalSnapshot.assets_index;
+  const retrievedDocs = retrievalSnapshot.documents;
+
+  const synthesisStartedAt = Date.now();
   let answer: string | null = null;
   let provider: { kind: "none" | "anthropic"; model?: string } = { kind: "none" };
   const notes: string[] = [];
@@ -388,8 +547,10 @@ agentRouter.post("/ask", async (c) => {
     answer = fb.answer;
     notes.push(...fb.notes);
   }
+  timingsMs.synthesis = Date.now() - synthesisStartedAt;
+  timingsMs.total = Date.now() - startedAt;
 
-  return c.json({
+  const payload: Record<string, unknown> = {
     ok: true,
     query,
     project_id: projectId,
@@ -400,7 +561,17 @@ agentRouter.post("/ask", async (c) => {
     retrieved: { memories: retrieved, assets_index, documents: retrievedDocs },
     answer,
     notes,
-  });
+  };
+
+  if (includeDiagnostics) {
+    payload.diagnostics = {
+      cache: cacheState,
+      cache_ttl_ms: retrievalCacheTtlMs,
+      timings_ms: timingsMs,
+    };
+  }
+
+  return c.json(payload);
 });
 
 function truthy(v: unknown): boolean {
@@ -613,7 +784,32 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
       ? { mode: "manual", strategies: ["memories_fts", "pageindex_artifacts"], reason: "Manual override: hybrid retrieval." }
       : heuristicRetrievalPlan(message, { allowDocuments });
   } else if (retrievalMode === "llm" && !dryRun && c.env.ANTHROPIC_API_KEY) {
-    retrieval_plan = await llmRetrievalPlan(c.env as any, message, { allowDocuments });
+    const planCacheKey = stableJsonStringify({
+      type: "agent:retrieval-plan",
+      tenantType,
+      tenantId,
+      allowDocuments,
+      query: normalizeQueryForCache(message),
+    });
+    const cachedPlan = retrievalPlanCache.get(planCacheKey);
+    if (cachedPlan) {
+      retrieval_plan = {
+        mode: cachedPlan.mode,
+        strategies: [...cachedPlan.strategies],
+        reason: cachedPlan.reason,
+      };
+    } else {
+      retrieval_plan = await llmRetrievalPlan(c.env as any, message, { allowDocuments });
+      retrievalPlanCache.set(
+        planCacheKey,
+        {
+          mode: retrieval_plan.mode,
+          strategies: [...retrieval_plan.strategies],
+          reason: retrieval_plan.reason,
+        },
+        RETRIEVAL_PLAN_CACHE_TTL_MS
+      );
+    }
   }
 
   const {
@@ -682,7 +878,15 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     let arenaRecommendation: ArenaRecommendation | null = null;
 
     if (autoMemoryMode || retrievalMode === "auto") {
-      arenaRecommendation = await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId });
+      const arenaCacheKey = stableJsonStringify({ type: "agent:arena", tenantType, tenantId, projectId });
+      const cachedArena = arenaRecommendationCache.get(arenaCacheKey);
+      if (cachedArena !== undefined) {
+        arenaRecommendation = cachedArena;
+      } else {
+        arenaRecommendation = await getLatestArenaRecommendation(db, { tenantType, tenantId, projectId });
+        arenaRecommendationCache.set(arenaCacheKey, arenaRecommendation ?? null, ARENA_RECOMMENDATION_CACHE_TTL_MS);
+      }
+
       if (arenaRecommendation) {
         if (autoMemoryMode) {
           resolvedMemoryMode = arenaRecommendation.memory_mode;
@@ -929,5 +1133,3 @@ agentRouter.post("/sessions/:id/continue", async (c) => {
     notes,
   });
 });
-
-
