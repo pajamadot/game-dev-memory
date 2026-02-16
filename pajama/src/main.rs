@@ -239,6 +239,59 @@ enum MemoriesCmd {
         #[arg(long)]
         json: bool,
     },
+
+    /// List active foresight memories ordered by nearest due date.
+    ForesightActive {
+        #[arg(long)]
+        project_id: Option<String>,
+
+        #[arg(long, alias = "query")]
+        q: Option<String>,
+
+        #[arg(long)]
+        state: Option<String>,
+
+        #[arg(long, default_value_t = false)]
+        include_inactive: bool,
+
+        #[arg(long, default_value_t = false)]
+        include_past: bool,
+
+        #[arg(long, default_value_t = 60)]
+        within_days: u32,
+
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Derive event-log and foresight memories from an existing memory.
+    Derive {
+        /// Parent memory id
+        id: String,
+
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+
+        #[arg(long, default_value_t = false)]
+        no_event_logs: bool,
+
+        #[arg(long, default_value_t = false)]
+        no_foresight: bool,
+
+        #[arg(long, default_value_t = 12)]
+        max_event_logs: u32,
+
+        #[arg(long, default_value_t = 6)]
+        max_foresight: u32,
+
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -813,10 +866,8 @@ async fn handle_memories(api: ApiClient, cmd: MemoriesCmd) -> Result<()> {
             limit,
             json,
         } => {
-            let mut query: Vec<(&str, String)> = vec![
-                ("limit", limit.to_string()),
-                ("memory_mode", memory_mode),
-            ];
+            let mut query: Vec<(&str, String)> =
+                vec![("limit", limit.to_string()), ("memory_mode", memory_mode)];
             if let Some(v) = project_id {
                 query.push(("project_id", v));
             }
@@ -955,7 +1006,10 @@ async fn handle_memories(api: ApiClient, cmd: MemoriesCmd) -> Result<()> {
                 return Ok(());
             }
             let total = res.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
-            let next_before = res.get("next_before").and_then(|v| v.as_str()).unwrap_or("-");
+            let next_before = res
+                .get("next_before")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
             println!("total       {}", total);
             println!("next_before {}", next_before);
             if let Some(entries) = res.get("entries").and_then(|v| v.as_array()) {
@@ -966,6 +1020,151 @@ async fn handle_memories(api: ApiClient, cmd: MemoriesCmd) -> Result<()> {
                     let title = e.get("title").and_then(|v| v.as_str()).unwrap_or("");
                     println!("{}\t{}\t{}\t{}", id, category, updated_at, title);
                 }
+            }
+        }
+        MemoriesCmd::ForesightActive {
+            project_id,
+            q,
+            state,
+            include_inactive,
+            include_past,
+            within_days,
+            limit,
+            json,
+        } => {
+            let mut query: Vec<(&str, String)> = vec![
+                ("limit", limit.to_string()),
+                ("within_days", within_days.to_string()),
+            ];
+            if let Some(v) = project_id {
+                query.push(("project_id", v));
+            }
+            if let Some(v) = q {
+                query.push(("q", v));
+            }
+            if let Some(v) = state {
+                query.push(("state", v));
+            }
+            if include_inactive {
+                query.push(("include_inactive", "true".to_string()));
+            }
+            if include_past {
+                query.push(("include_past", "true".to_string()));
+            }
+
+            let res: serde_json::Value = api
+                .get_json("/api/memories/foresight/active", &query)
+                .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let total = res
+                .get("meta")
+                .and_then(|v| v.get("total"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let within = res
+                .get("meta")
+                .and_then(|v| v.get("within_days"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(within_days as u64);
+            println!("foresight_total {}", total);
+            println!("within_days    {}", within);
+
+            if let Some(items) = res.get("foresight").and_then(|v| v.as_array()) {
+                for item in items {
+                    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("-");
+                    let due_days = item
+                        .get("due_in_days")
+                        .and_then(|v| v.as_i64())
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "n/a".to_string());
+                    let due = item
+                        .get("due_time")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unscheduled");
+                    let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    println!("{}\tD-{}\t{}\t{}", id, due_days, due, title);
+                }
+            }
+        }
+        MemoriesCmd::Derive {
+            id,
+            dry_run,
+            no_event_logs,
+            no_foresight,
+            max_event_logs,
+            max_foresight,
+            json,
+        } => {
+            let payload = serde_json::json!({
+                "dry_run": dry_run,
+                "create_event_logs": !no_event_logs,
+                "create_foresight": !no_foresight,
+                "max_event_logs": max_event_logs,
+                "max_foresight": max_foresight
+            });
+
+            let res: serde_json::Value = api
+                .post_json(&format!("/api/memories/{id}/derive"), &payload)
+                .await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+                return Ok(());
+            }
+
+            let parent = res
+                .get("parent_memory_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
+            let created_event = res
+                .get("created")
+                .and_then(|v| v.get("event_log"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let created_foresight = res
+                .get("created")
+                .and_then(|v| v.get("foresight"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let is_dry_run = res
+                .get("dry_run")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            println!("parent_memory_id {}", parent);
+            println!("dry_run          {}", is_dry_run);
+            println!("created_event    {}", created_event);
+            println!("created_foresight {}", created_foresight);
+
+            if let Some(ids) = res.get("ids") {
+                if let Some(ev) = ids.get("event_log").and_then(|v| v.as_array()) {
+                    for idv in ev.iter().filter_map(|v| v.as_str()) {
+                        println!("event_log_id     {}", idv);
+                    }
+                }
+                if let Some(fs) = ids.get("foresight").and_then(|v| v.as_array()) {
+                    for idv in fs.iter().filter_map(|v| v.as_str()) {
+                        println!("foresight_id     {}", idv);
+                    }
+                }
+            }
+
+            if let Some(plan) = res.get("plan") {
+                let event_plan = plan
+                    .get("event_logs")
+                    .and_then(|v| v.as_array())
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+                let foresight_plan = plan
+                    .get("foresight")
+                    .and_then(|v| v.as_array())
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+                println!("planned_event    {}", event_plan);
+                println!("planned_foresight {}", foresight_plan);
             }
         }
     }
@@ -1455,17 +1654,19 @@ async fn handle_evolve(api: ApiClient, cmd: EvolveCmd) -> Result<()> {
             let best_project = campaign
                 .get("projects")
                 .and_then(|v| v.as_array())
-                .and_then(|arr| arr.iter().max_by(|a, b| {
-                    let sa = a
-                        .get("best_arm_score")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(-1.0);
-                    let sb = b
-                        .get("best_arm_score")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(-1.0);
-                    sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
-                }))
+                .and_then(|arr| {
+                    arr.iter().max_by(|a, b| {
+                        let sa = a
+                            .get("best_arm_score")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(-1.0);
+                        let sb = b
+                            .get("best_arm_score")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(-1.0);
+                        sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                })
                 .cloned()
                 .unwrap_or(serde_json::Value::Null);
 
@@ -1488,7 +1689,10 @@ async fn handle_evolve(api: ApiClient, cmd: EvolveCmd) -> Result<()> {
                     .get("best_arm_score")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
-                println!("best_project             {} :: {} ({:.6})", project, arm, score);
+                println!(
+                    "best_project             {} :: {} ({:.6})",
+                    project, arm, score
+                );
             }
         }
     }
@@ -1576,7 +1780,10 @@ async fn handle_agent(api: ApiClient, cmd: AgentCmd) -> Result<()> {
 
             println!("memory_mode      {}", mode);
             println!("provider         {}", provider);
-            println!("evidence         {} memories, {} documents", memory_count, doc_count);
+            println!(
+                "evidence         {} memories, {} documents",
+                memory_count, doc_count
+            );
             println!();
             println!("{}", answer);
 

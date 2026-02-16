@@ -31,6 +31,8 @@ function llmBootstrapSnippet(): string {
     "$env:PAJAMA_API_URL = \"https://api-game-dev-memory.pajamadot.com\"",
     "$env:PAJAMA_TOKEN = \"gdm_...\"",
     "pajama projects list",
+    "pajama memories derive <memory-id> --dry-run",
+    "pajama memories foresight-active --project-id <project-uuid> --within-days 30 --limit 25",
     "```",
     "",
     "## Install Skill: pajama-cli",
@@ -151,3 +153,4 @@ export default async function SkillsDocsPage() {
     </div>
   );
 }
+

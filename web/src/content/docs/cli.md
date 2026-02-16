@@ -85,6 +85,9 @@ pajama memories create --project-id <project-uuid> --category bug --title "Crash
 pajama memories search-index --project-id <project-uuid> --q "shader compile crash" --provider memories_fts --memory-mode balanced --limit 20
 pajama memories batch-get --ids <memory-id-1>,<memory-id-2>
 pajama memories timeline --project-id <project-uuid> --limit 100
+pajama memories derive <memory-id> --dry-run
+pajama memories derive <memory-id>
+pajama memories foresight-active --project-id <project-uuid> --within-days 30 --limit 25
 ```
 
 Assets (large files):
@@ -198,3 +201,4 @@ cp -R "$tmp/gdm/skills/pajama-cli/"* "$CODEX_HOME/skills/pajama-cli/"
 ```
 
 After install, you can tell your agent to use the `pajama-cli` skill to record memories and attach evidence files (assets) during sessions.
+

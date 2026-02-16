@@ -46,6 +46,9 @@ function llmBootstrapSnippet(): string {
     "pajama projects list",
     "pajama memories list --project-id <project-uuid> --limit 50",
     "pajama memories create --project-id <project-uuid> --category note --title \"...\" --content \"...\" --tags \"tag1,tag2\"",
+    "pajama memories derive <memory-id> --dry-run",
+    "pajama memories derive <memory-id>",
+    "pajama memories foresight-active --project-id <project-uuid> --within-days 30 --limit 25",
     "",
     "# Evidence files (R2 assets): upload + link to memory",
     "pajama assets upload --project-id <project-uuid> --path \"C:\\\\tmp\\\\build.zip\"",
@@ -244,3 +247,4 @@ pajama projects list
     </div>
   );
 }
+

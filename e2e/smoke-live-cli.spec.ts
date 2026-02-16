@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 function envBool(name: string, fallback = false): boolean {
   const raw = (process.env[name] || "").trim().toLowerCase();
@@ -15,6 +17,22 @@ function safeOrigin(v: string | undefined, fallback: string): string {
   } catch {
     return fallback;
   }
+}
+
+function cliPackageSpec(): string {
+  const fromEnv = (process.env.E2E_CLI_PACKAGE || "").trim();
+  if (fromEnv) return fromEnv;
+
+  const pkgPath = path.join(process.cwd(), "packages", "pajama", "package.json");
+  try {
+    const parsed = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    if (parsed.version && parsed.version.trim()) {
+      return `@pajamadot/pajama@${parsed.version.trim()}`;
+    }
+  } catch {
+    // Fallback below.
+  }
+  return "@pajamadot/pajama@latest";
 }
 
 async function run(cmd: string, args: string[], opts?: { timeoutMs?: number }): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -45,23 +63,26 @@ const isLive = envBool("E2E_LIVE", false);
 
 const apiOrigin = safeOrigin(process.env.E2E_API_ORIGIN, "https://api-game-dev-memory.pajamadot.com");
 const apiToken = (process.env.E2E_API_TOKEN || "").trim();
+const npxPkg = cliPackageSpec();
 
 test.describe("Live CLI smoke (npx)", () => {
   test.skip(!isLive, "Set E2E_LIVE=true to run deployed smoke tests.");
 
   test("npx @pajamadot/pajama --version runs", async () => {
-    const res = await run("npx", ["-y", "@pajamadot/pajama", "--version"], { timeoutMs: 240_000 });
+    const res = await run("npx", ["-y", npxPkg, "--version"], { timeoutMs: 240_000 });
     expect(res.code).toBe(0);
     expect((res.stdout + res.stderr).toLowerCase()).toContain("pajama");
   });
 
   test("npx @pajamadot/pajama memories --help shows progressive commands", async () => {
-    const res = await run("npx", ["-y", "@pajamadot/pajama", "memories", "--help"], { timeoutMs: 240_000 });
+    const res = await run("npx", ["-y", npxPkg, "memories", "--help"], { timeoutMs: 240_000 });
     expect(res.code).toBe(0);
     const out = (res.stdout + res.stderr).toLowerCase();
     expect(out).toContain("search-index");
     expect(out).toContain("batch-get");
     expect(out).toContain("timeline");
+    expect(out).toContain("derive");
+    expect(out).toContain("foresight-active");
   });
 
   test("--query alias is accepted (does not fail clap parsing)", async () => {
@@ -71,7 +92,7 @@ test.describe("Live CLI smoke (npx)", () => {
       "npx",
       [
         "-y",
-        "@pajamadot/pajama",
+        npxPkg,
         "memories",
         "search-index",
         "--api-url",
@@ -96,7 +117,7 @@ test.describe("Live CLI smoke (npx)", () => {
       "npx",
       [
         "-y",
-        "@pajamadot/pajama",
+        npxPkg,
         "memories",
         "search-index",
         "--api-url",
@@ -116,4 +137,3 @@ test.describe("Live CLI smoke (npx)", () => {
     expect(out).toContain("hits");
   });
 });
-

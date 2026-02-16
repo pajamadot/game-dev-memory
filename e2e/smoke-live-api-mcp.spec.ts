@@ -142,6 +142,9 @@ test.describe("Live API/MCP smoke", () => {
     expect(toolNames).toContain("memories.search_index");
     expect(toolNames).toContain("memories.batch_get");
     expect(toolNames).toContain("memories.timeline");
+    expect(toolNames).toContain("memories.derive");
+    expect(toolNames).toContain("memories.foresight_active");
   });
 });
+
 

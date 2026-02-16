@@ -19,8 +19,8 @@ This project is built around one core rule:
 
 ### Current release state
 
-- Worker/API latest deployed version: `db4b5abb-4565-4eb9-a9b7-8dce8edbbbfd`
-- CLI latest npm package: `@pajamadot/pajama@0.1.8`
+- Worker/API latest deployed version: `e69d4774-32f3-400f-81a2-ea20afd2b586`
+- CLI latest npm package: `@pajamadot/pajama@0.1.9`
 - Last end-to-end verification: February 16, 2026 (local build + Playwright e2e smoke)
 - CLI binary download prefix:
   - `https://api-game-dev-memory.pajamadot.com/downloads/pajama/v{version}/{file}`
@@ -475,6 +475,8 @@ Detailed runbook:
 - `docs/deployment.md`
 - `docs/e2e.md`
 - `docs/roadmap.md`
+
+
 
 
 

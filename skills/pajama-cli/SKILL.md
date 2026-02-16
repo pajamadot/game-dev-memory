@@ -69,6 +69,9 @@ Memories:
 ```powershell
 pajama memories list --project-id <project-uuid> --limit 50
 pajama memories create --project-id <project-uuid> --category bug --title "DX12 crash" --content "Root cause..." --tags "dx12,crash"
+pajama memories derive <memory-id> --dry-run
+pajama memories derive <memory-id>
+pajama memories foresight-active --project-id <project-uuid> --within-days 30 --limit 25
 ```
 
 Assets (large files via multipart upload):
@@ -107,3 +110,4 @@ Tip: prefer categories that match retrieval intent (`build-error`, `bug`, `decis
 - You changed Memory API endpoints and want a stable, repeatable way to exercise them.
 - You are building ingestion tooling (UE logs, traces) and want to upload/link large artifacts quickly.
 - You want a reliable "write memory + attach evidence" pattern at the end of an agentic coding session.
+

@@ -3,6 +3,7 @@ import type { AuthContext } from "../auth/types";
 import { withDbClient } from "../db";
 import { listProjects, createProject } from "../core/projects";
 import { listMemories, createMemory, getMemory, type MemoryState } from "../core/memories";
+import { deriveMemoryPlan } from "../core/memoryDerivation";
 import { batchGetMemories, listMemorySearchProviders, listMemoryTimeline, searchMemoryIndex } from "../core/memoryRetrieval";
 import type { TenantType } from "../tenant";
 
@@ -84,6 +85,67 @@ function normalizeTags(v: unknown): string[] {
 
 function normalizeTenant(auth: AuthContext): { tenantType: TenantType; tenantId: string; actorId: string | null } {
   return { tenantType: auth.tenantType, tenantId: auth.tenantId, actorId: auth.actorId };
+}
+
+function parseJsonObject(v: unknown): Record<string, unknown> {
+  if (!v) return {};
+  if (typeof v === "object") return v as Record<string, unknown>;
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function parseIsoMs(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : null;
+}
+
+function normalizeDbTags(v: unknown): string[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.filter((t): t is string => typeof t === "string").slice(0, 64);
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((t): t is string => typeof t === "string").slice(0, 64);
+      }
+    } catch {
+      const split = v
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 64);
+      return split;
+    }
+  }
+  return [];
+}
+
+function uniqTags(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    const t = (v || "").trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+function shortText(v: unknown, max = 120): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (s.length <= max) return s;
+  return `${s.slice(0, max).trimEnd()}...`;
 }
 
 const tools: McpTool[] = [
@@ -176,6 +238,42 @@ const tools: McpTool[] = [
         after: { type: "string" },
         limit: { type: "integer", minimum: 1, maximum: 500 },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "memories.foresight_active",
+    description: "List active foresight memories ordered by nearest due date.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string" },
+        q: { type: "string" },
+        state: { type: "string", enum: ["active", "superseded", "quarantined"] },
+        include_inactive: { type: "boolean" },
+        include_past: { type: "boolean" },
+        within_days: { type: "integer", minimum: 1, maximum: 3650 },
+        limit: { type: "integer", minimum: 1, maximum: 300 },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "memories.derive",
+    description: "Derive event-log and foresight memories from an existing memory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        dry_run: { type: "boolean" },
+        create_event_logs: { type: "boolean" },
+        create_foresight: { type: "boolean" },
+        no_event_logs: { type: "boolean" },
+        no_foresight: { type: "boolean" },
+        max_event_logs: { type: "integer", minimum: 0, maximum: 50 },
+        max_foresight: { type: "integer", minimum: 0, maximum: 20 },
+      },
+      required: ["id"],
       additionalProperties: false,
     },
   },
@@ -407,6 +505,234 @@ export async function handleMcpJsonRpc(env: Env, auth: AuthContext, request: Mcp
           return okResponse(id, jsonContent(result as unknown as Record<string, unknown>));
         }
 
+        if (toolName === "memories.foresight_active") {
+          const projectId = typeof toolArgs["project_id"] === "string" ? toolArgs["project_id"] : null;
+          const search =
+            typeof toolArgs["q"] === "string"
+              ? toolArgs["q"].trim().toLowerCase()
+              : typeof toolArgs["query"] === "string"
+                ? toolArgs["query"].trim().toLowerCase()
+                : "";
+          const includeInactive = toolArgs["include_inactive"] === true;
+          const includePast = toolArgs["include_past"] === true;
+          const state = parseMemoryState(toolArgs["state"]);
+          const states: MemoryState[] | null | undefined = includeInactive ? null : state ? [state] : undefined;
+          const withinDaysRaw = Number(toolArgs["within_days"] || 60);
+          const limitRaw = Number(toolArgs["limit"] || 50);
+          const withinDays = Math.min(Math.max(Math.trunc(withinDaysRaw), 1), 3650);
+          const limit = Math.min(Math.max(Math.trunc(limitRaw), 1), 300);
+
+          const rows = await withDbClient(env, async (db) =>
+            await listMemories(db, tenantType, tenantId, {
+              projectId,
+              category: "foresight",
+              states,
+              limit: Math.min(Math.max(limit * 4, limit), 500),
+              mode: "preview",
+              memoryMode: "fast",
+            })
+          );
+
+          const nowMs = Date.now();
+          const horizonMs = nowMs + withinDays * 24 * 60 * 60 * 1000;
+
+          const filtered = (rows || [])
+            .map((row: any) => {
+              const context = parseJsonObject(row?.context);
+              const dueRaw = context["end_time"] ?? context["due_at"] ?? context["deadline"];
+              const dueMs = parseIsoMs(dueRaw);
+              const dueIso = dueMs ? new Date(dueMs).toISOString() : null;
+              const dueInDays = dueMs ? Math.round((dueMs - nowMs) / (24 * 60 * 60 * 1000)) : null;
+              return {
+                ...row,
+                due_time: dueIso,
+                due_in_days: dueInDays,
+              };
+            })
+            .filter((row: any) => {
+              const hay = `${String(row?.title || "")}\n${String(row?.content || "")}`.toLowerCase();
+              if (search && !hay.includes(search)) return false;
+
+              const dueMs = row?.due_time ? Date.parse(String(row.due_time)) : NaN;
+              if (!Number.isFinite(dueMs)) return true;
+
+              if (!includePast && dueMs < nowMs) return false;
+              if (dueMs > horizonMs) return false;
+              return true;
+            })
+            .sort((a: any, b: any) => {
+              const aDue = a?.due_time ? Date.parse(String(a.due_time)) : Number.POSITIVE_INFINITY;
+              const bDue = b?.due_time ? Date.parse(String(b.due_time)) : Number.POSITIVE_INFINITY;
+              if (aDue !== bDue) return aDue - bDue;
+              return Date.parse(String(b?.updated_at || "")) - Date.parse(String(a?.updated_at || ""));
+            })
+            .slice(0, limit);
+
+          return okResponse(
+            id,
+            jsonContent({
+              foresight: filtered,
+              meta: {
+                total: filtered.length,
+                within_days: withinDays,
+                include_past: includePast,
+              },
+            })
+          );
+        }
+
+        if (toolName === "memories.derive") {
+          const memId = String(toolArgs["id"] || "").trim();
+          if (!memId) return errorResponse(id, MCP_ERROR_CODES.INVALID_PARAMS, "id is required");
+
+          const dryRun = toolArgs["dry_run"] === true;
+          const createEventLogs = toolArgs["create_event_logs"] === false || toolArgs["no_event_logs"] === true ? false : true;
+          const createForesight = toolArgs["create_foresight"] === false || toolArgs["no_foresight"] === true ? false : true;
+          const maxEventLogs = Math.min(Math.max(Math.trunc(Number(toolArgs["max_event_logs"] || 12)), 0), 50);
+          const maxForesight = Math.min(Math.max(Math.trunc(Number(toolArgs["max_foresight"] || 6)), 0), 20);
+
+          const out = await withDbClient(env, async (db) => {
+            const parentRes = await db.query(
+              `SELECT id, project_id, session_id, category, source_type, title, content, tags, confidence
+               FROM memories
+               WHERE id = $1 AND tenant_type = $2 AND tenant_id = $3`,
+              [memId, tenantType, tenantId]
+            );
+            const parent = parentRes.rows[0] ?? null;
+            if (!parent) return { error: "not_found" as const };
+
+            const parentCategory = String(parent.category || "").toLowerCase();
+            if (parentCategory === "event_log" || parentCategory === "foresight") {
+              return { error: "unsupported_source" as const, category: parentCategory };
+            }
+
+            const nowIso = new Date().toISOString();
+            const plan = deriveMemoryPlan({
+              title: String(parent.title || ""),
+              content: String(parent.content || ""),
+              nowIso,
+              maxEventLogs,
+              maxForesight,
+            });
+
+            if (dryRun) {
+              return {
+                ok: true,
+                dry_run: true,
+                parent_memory_id: memId,
+                created: { event_log: 0, foresight: 0 },
+                ids: { event_log: [] as string[], foresight: [] as string[] },
+                plan,
+              };
+            }
+
+            const baseTags = normalizeDbTags(parent.tags);
+            const eventLogIds: string[] = [];
+            const foresightIds: string[] = [];
+
+            const createDerivedLink = async (fromId: string, toId: string, metadata: Record<string, unknown>) => {
+              await db.query(
+                `INSERT INTO entity_links (
+                   id, tenant_type, tenant_id,
+                   from_type, from_id, to_type, to_id,
+                   relation, metadata, created_at, created_by
+                 )
+                 VALUES ($1, $2, $3, 'memory', $4::uuid, 'memory', $5::uuid, 'derived_from', $6::jsonb, $7, $8)`,
+                [crypto.randomUUID(), tenantType, tenantId, fromId, toId, JSON.stringify(metadata), nowIso, actorId]
+              );
+            };
+
+            if (createEventLogs) {
+              for (const item of plan.event_logs) {
+                const childId = crypto.randomUUID();
+                await createMemory(db, {
+                  tenantType,
+                  tenantId,
+                  actorId,
+                  id: childId,
+                  projectId: String(parent.project_id),
+                  sessionId: parent.session_id ? String(parent.session_id) : null,
+                  category: "event_log",
+                  sourceType: "derived",
+                  title: `Event: ${shortText(item.text, 90)}`,
+                  content: item.text,
+                  tags: uniqTags([...baseTags, "derived", "event_log", "evermemos"]),
+                  context: {
+                    derived: {
+                      framework: "evermemos-inspired",
+                      type: "event_log",
+                      parent_memory_id: memId,
+                      parent_category: parentCategory,
+                      parent_source_type: String(parent.source_type || "manual"),
+                    },
+                    evidence: item.evidence,
+                    confidence_hint: item.confidence,
+                  },
+                  confidence: item.confidence,
+                  nowIso,
+                });
+                await createDerivedLink(childId, memId, { type: "event_log", framework: "evermemos-inspired" });
+                eventLogIds.push(childId);
+              }
+            }
+
+            if (createForesight) {
+              for (const item of plan.foresight) {
+                const childId = crypto.randomUUID();
+                await createMemory(db, {
+                  tenantType,
+                  tenantId,
+                  actorId,
+                  id: childId,
+                  projectId: String(parent.project_id),
+                  sessionId: parent.session_id ? String(parent.session_id) : null,
+                  category: "foresight",
+                  sourceType: "derived",
+                  title: `Foresight: ${shortText(item.text, 90)}`,
+                  content: item.text,
+                  tags: uniqTags([...baseTags, "derived", "foresight", "evermemos"]),
+                  context: {
+                    derived: {
+                      framework: "evermemos-inspired",
+                      type: "foresight",
+                      parent_memory_id: memId,
+                      parent_category: parentCategory,
+                      parent_source_type: String(parent.source_type || "manual"),
+                    },
+                    evidence: item.evidence,
+                    start_time: item.start_time,
+                    end_time: item.end_time,
+                    due_kind: item.due_kind,
+                    confidence_hint: item.confidence,
+                  },
+                  confidence: item.confidence,
+                  nowIso,
+                });
+                await createDerivedLink(childId, memId, { type: "foresight", framework: "evermemos-inspired" });
+                foresightIds.push(childId);
+              }
+            }
+
+            return {
+              ok: true,
+              dry_run: false,
+              parent_memory_id: memId,
+              created: { event_log: eventLogIds.length, foresight: foresightIds.length },
+              ids: { event_log: eventLogIds, foresight: foresightIds },
+              plan,
+            };
+          });
+
+          if ((out as any)?.error === "not_found") return errorResponse(id, 404, "Memory not found");
+          if ((out as any)?.error === "unsupported_source") {
+            return errorResponse(id, MCP_ERROR_CODES.INVALID_PARAMS, "Cannot derive from already-derived memory category", {
+              category: (out as any)?.category,
+            });
+          }
+
+          return okResponse(id, jsonContent(out as unknown as Record<string, unknown>));
+        }
+
         if (toolName === "memories.get") {
           const memId = String(toolArgs["id"] || "").trim();
           if (!memId) return errorResponse(id, MCP_ERROR_CODES.INVALID_PARAMS, "id is required");
@@ -468,3 +794,4 @@ export async function handleMcpJsonRpc(env: Env, auth: AuthContext, request: Mcp
       return errorResponse(id, MCP_ERROR_CODES.METHOD_NOT_FOUND, `Unknown method: ${method}`);
   }
 }
+

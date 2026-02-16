@@ -29,6 +29,11 @@ pajama memories search-index --project-id <project-uuid> --q "cook failure" --pr
 pajama memories batch-get --ids <memory-id-1>,<memory-id-2>
 pajama memories timeline --project-id <project-uuid> --limit 100
 
+# EverMemOS-style derivation + active foresight lane
+pajama memories derive <memory-id> --dry-run
+pajama memories derive <memory-id>
+pajama memories foresight-active --project-id <project-uuid> --within-days 30 --limit 25
+
 # Run retrieval evolution from CLI
 pajama evolve policy --project-id <project-uuid>
 pajama evolve arena-latest --project-id <project-uuid>
@@ -73,3 +78,4 @@ If the binary is missing after install:
 - Ensure npm scripts are enabled (`npm config get ignore-scripts` should be `false`)
 - Re-run install scripts: `npm rebuild -g @pajamadot/pajama`
 - Or just run `pajama --version` (the launcher will attempt an on-demand install)
+

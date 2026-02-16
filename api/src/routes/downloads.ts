@@ -55,8 +55,8 @@ downloadsRouter.get("/pajama", (c) => {
     description: "Prebuilt `pajama` CLI binaries (download prefix).",
     pattern: "/downloads/pajama/v{version}/{file}",
     examples: [
-      "/downloads/pajama/v0.1.8/pajama-win32-x64.exe",
-      "/downloads/pajama/v0.1.8/pajama-win32-x64.exe.sha256",
+      "/downloads/pajama/v0.1.9/pajama-win32-x64.exe",
+      "/downloads/pajama/v0.1.9/pajama-win32-x64.exe.sha256",
     ],
     notes: [
       "This endpoint is a prefix; download URLs include a version and filename.",
@@ -67,3 +67,4 @@ downloadsRouter.get("/pajama", (c) => {
 downloadsRouter.on("HEAD", "/pajama", (c) => new Response(null, { status: 200 }));
 downloadsRouter.get("/pajama/:version/:file", handlePajamaDownload);
 downloadsRouter.on("HEAD", "/pajama/:version/:file", handlePajamaDownload);
+
