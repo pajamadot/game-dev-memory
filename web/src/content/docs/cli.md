@@ -111,7 +111,9 @@ pajama evolve arena-campaign --max-projects 10 --iterations-per-project 200 --ti
 
 # Agent (retrieval-first)
 pajama agent status
-pajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?"`r`npajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?" --dry-run --diagnostics`r`npajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?" --dry-run --diagnostics --no-cache
+pajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?"
+pajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?" --dry-run --diagnostics
+pajama agent ask --project-id <project-uuid> --query "what changed in rendering perf?" --dry-run --diagnostics --no-cache --cache-ttl-ms 15000
 ```
 
 
@@ -128,6 +130,8 @@ Common tuning switches:
 - `-NoCache` for cold-path latency.
 - `-MemoryMode fast|balanced|deep` for recall/latency tradeoffs.
 - `-RetrievalMode auto|memories|hybrid|documents` for routing comparisons.
+- `-CacheTtlMs` to tune worker-side retrieval cache TTL per run.
+
 ## Evidence-First: Link Files To Memories
 
 Create a memory first:

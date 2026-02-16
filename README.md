@@ -19,9 +19,9 @@ This project is built around one core rule:
 
 ### Current release state
 
-- Worker/API latest deployed version: `e69d4774-32f3-400f-81a2-ea20afd2b586`
+- Worker/API latest deployed version: `a9c21431-4bac-4b21-b0ae-136d80844a95`
 - CLI latest npm package: `@pajamadot/pajama@0.1.10`
-- Last end-to-end verification: February 16, 2026 (local build + Playwright e2e smoke)
+- Last end-to-end verification: February 16, 2026 (local build + Playwright e2e + deployed smoke checks)
 - CLI binary download prefix:
   - `https://api-game-dev-memory.pajamadot.com/downloads/pajama/v{version}/{file}`
 - DB backend: Neon Postgres via Cloudflare Hyperdrive
@@ -125,10 +125,18 @@ pajama assets upload --project-id "<project_uuid>" --path "C:\\logs\\build.zip" 
 ### Ask the agent (retrieval-first)
 
 ```powershell
-pajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run`r`npajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run --diagnostics
+pajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run
+pajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run --diagnostics
+pajama agent ask --project-id "<project_uuid>" --query "What changed in build times this week?" --dry-run --diagnostics --no-cache --cache-ttl-ms 15000
 ```
 
 Remove `--dry-run` to request synthesis when LLM is configured on the Worker.
+
+### Benchmark Retrieval Performance
+
+```powershell
+./scripts/benchmark-agent-retrieval.ps1 -Token "<gdm_api_key>" -ProjectId "<project_uuid>" -Iterations 12
+```
 
 ## Why This Exists
 
@@ -343,10 +351,10 @@ Migrations in `api/migrations/`:
 ### PageIndex-TS (`packages/pageindex-ts/`)
 
 - Worker-friendly TypeScript port inspired by `VectifyAI/PageIndex` (MIT).
-- Used to build hierarchical indexes for artifacts and enable 鈥渄ocument node鈥?retrieval without a vector DB.
+- Used to build hierarchical indexes for artifacts and enable document-node retrieval without a vector DB.
 - Research notes and port status:
   - `research/pageindex.md`
-- `research/evermemos.md`
+  - `research/evermemos.md`
   - `packages/pageindex-ts/PORT_STATUS.md`
 
 ### Research pipeline
@@ -404,7 +412,10 @@ Migrations in `api/migrations/`:
 - Additional indexes added for session/memory/evolution hot paths.
 - Arena campaign mode supports bounded multi-project evaluation.
 - Asset multipart path enforces part sizing and max part count safety.
-- Agent routes include deterministic fallback synthesis to avoid empty conversation responses.`r`n- Worker-side ephemeral retrieval caches now reduce repeated query latency (tenant/project/query scoped).`r`n- `/api/agent/ask` exposes optional `diagnostics` payload (cache hit state + stage timings) for live tuning.`r`n- Use `./scripts/benchmark-agent-retrieval.ps1` to compare cache on/off and retrieval mode latency against production.
+- Agent routes include deterministic fallback synthesis to avoid empty conversation responses.
+- Worker-side ephemeral retrieval caches now reduce repeated query latency (tenant/project/query scoped).
+- `/api/agent/ask` exposes optional `diagnostics` payload (cache hit state + stage timings) for live tuning.
+- Use `./scripts/benchmark-agent-retrieval.ps1` to compare cache on/off and retrieval mode latency against production.
 
 ## Security and Compliance Posture
 

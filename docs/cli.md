@@ -78,7 +78,9 @@ pajama evolve arena-campaign --max-projects 10 --iterations-per-project 200 --ti
 
 # Agent (retrieval-first ask)
 pajama agent status
-pajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?"`r`npajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?" --dry-run --diagnostics`r`npajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?" --dry-run --diagnostics --no-cache
+pajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?"
+pajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?" --dry-run --diagnostics
+pajama agent ask --project-id <project-uuid> --query "why is cook failing in CI?" --dry-run --diagnostics --no-cache
 ```
 
 
@@ -95,6 +97,8 @@ Useful switches:
 - `-NoCache` to measure cold-path retrieval latency.
 - `-MemoryMode fast|balanced|deep` to compare retrieval profiles.
 - `-RetrievalMode auto|memories|hybrid|documents` to compare routing policy.
+- `-CacheTtlMs` to force a shorter/longer worker-side retrieval cache TTL.
+
 ## Automation
 
 You can override config values without re-login:

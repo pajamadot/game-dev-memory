@@ -43,7 +43,9 @@ pajama evolve arena-campaign --max-projects 10 --iterations-per-project 200 --ti
 
 # Ask the memory agent
 pajama agent status
-pajama agent ask --project-id <project-uuid> --query "summarize latest build failures"`r`npajama agent ask --project-id <project-uuid> --query "summarize latest build failures" --dry-run --diagnostics`r`npajama agent ask --project-id <project-uuid> --query "summarize latest build failures" --dry-run --diagnostics --no-cache
+pajama agent ask --project-id <project-uuid> --query "summarize latest build failures"
+pajama agent ask --project-id <project-uuid> --query "summarize latest build failures" --dry-run --diagnostics
+pajama agent ask --project-id <project-uuid> --query "summarize latest build failures" --dry-run --diagnostics --no-cache --cache-ttl-ms 15000
 ```
 
 
@@ -52,6 +54,7 @@ Benchmark helper (live API):
 ```powershell
 ./scripts/benchmark-agent-retrieval.ps1 -Token "<gdm_api_key>" -ProjectId "<project-uuid>" -Iterations 12
 ```
+
 ## Environment Variables
 
 - `PAJAMA_API_URL`: Memory API base URL (defaults to `https://api-game-dev-memory.pajamadot.com`)

@@ -1,113 +1,102 @@
 ---
 name: pajama-cli
-description: Use the Rust `pajama` CLI to authenticate (OAuth PKCE via web) and operate on org/project memory (projects, memories, assets) through the Memory API. Use in agentic coding sessions to verify end-to-end flows without hand-writing curl/Invoke-RestMethod snippets.
-tags: [cli, oauth, pkce, api-keys, assets, memory]
+description: Use the `pajama` CLI to authenticate with OAuth PKCE and operate on Game Dev Memory projects, memories, assets, evolution endpoints, and agent routes. Use this skill when you need repeatable end-to-end API workflows from terminal sessions without hand-writing REST calls.
 ---
 
 # Pajama CLI Skill
 
-Use the `pajama/` Rust CLI for end-to-end testing and operational workflows against the Memory API.
+Use this skill to run production-like memory workflows from terminal sessions.
 
-This is the preferred interface for scripts and agents once installed:
+## Current Release
 
-- Web login is handled once via OAuth PKCE.
-- All subsequent operations use `Authorization: Bearer gdm_...`.
+- npm package: `@pajamadot/pajama@0.1.10`
+- API base default: `https://api-game-dev-memory.pajamadot.com`
+- Download prefix: `https://api-game-dev-memory.pajamadot.com/downloads/pajama`
 
-## Build / Install
+## Install
+
+```powershell
+npm i -g @pajamadot/pajama
+pajama --version
+```
+
+Source build (optional):
 
 ```powershell
 cd pajama
 cargo build --release
 ```
 
-Optional install:
-
-```powershell
-cargo install --path . --force
-```
-
-Install via npm (prebuilt binary):
-
-```powershell
-npm i -g @pajamadot/pajama
-```
-
 ## Auth
 
-Interactive login (opens browser, loopback redirect):
+Interactive OAuth:
 
 ```powershell
 pajama login
 ```
 
-If the environment can't open a browser:
+If browser auto-open fails:
 
 ```powershell
 pajama login --no-open
 ```
 
-If you need more time to approve in the browser:
+Non-interactive token mode:
 
-- Set `PAJAMA_OAUTH_CALLBACK_TIMEOUT_SECS=900` (default) or higher
+- set `PAJAMA_TOKEN=gdm_...`, or
+- pass `--token gdm_...` per command.
 
-Non-interactive (CI-like) auth for local agent sessions:
-
-- Set `PAJAMA_TOKEN=gdm_...`
-- Or pass `--token gdm_...` on the command line
-
-## Common Operations
-
-Projects:
+## Core Workflow
 
 ```powershell
+# projects
 pajama projects list
 pajama projects create --name "UE5 Prototype" --engine unreal --description "Memory sandbox"
-```
 
-Memories:
-
-```powershell
+# memory operations
 pajama memories list --project-id <project-uuid> --limit 50
-pajama memories create --project-id <project-uuid> --category bug --title "DX12 crash" --content "Root cause..." --tags "dx12,crash"
+pajama memories search-index --project-id <project-uuid> --q "cook failure" --provider memories_fts --memory-mode balanced --limit 20
+pajama memories batch-get --ids <memory-id-1>,<memory-id-2>
+pajama memories timeline --project-id <project-uuid> --limit 100
+
+# derivation and foresight
 pajama memories derive <memory-id> --dry-run
 pajama memories derive <memory-id>
 pajama memories foresight-active --project-id <project-uuid> --within-days 30 --limit 25
-```
 
-Assets (large files via multipart upload):
-
-```powershell
+# assets
 pajama assets upload --project-id <project-uuid> --path "C:\\tmp\\build.zip"
-pajama assets list --project-id <project-uuid>
+pajama assets upload --project-id <project-uuid> --memory-id <memory-uuid> --path "C:\\tmp\\Saved\\Logs\\MyProject.log"
 ```
 
-## Recording Memory (Agent Session Pattern)
-
-Use this when you want the agent to leave durable, searchable traces of what it did (and attach evidence files):
-
-1) Write a memory entry (facts + decisions + next steps).
-2) Upload raw evidence (logs, zips, traces) as assets and link them to that memory.
-3) Verify links so retrieval stays evidence-first.
-
-Example: create a memory, then attach a log file:
+## Agent Diagnostics and Cache Tuning
 
 ```powershell
-$project = "<project-uuid>"
-$mem = pajama memories create --project-id $project --category session-summary --title "Fix build break" --content "What changed, why, and what's next" --tags "build,ci,fix"
-
-# Link a file to that memory for later inspection
-pajama assets upload --project-id $project --memory-id $mem --path "C:\\tmp\\build.log"
-
-# Verify the link
-pajama assets list --memory-id $mem
+pajama agent status
+pajama agent ask --project-id <project-uuid> --query "summarize build regressions" --dry-run --diagnostics
+pajama agent ask --project-id <project-uuid> --query "summarize build regressions" --dry-run --diagnostics --no-cache --cache-ttl-ms 15000
 ```
 
-Tip: prefer categories that match retrieval intent (`build-error`, `bug`, `decision`, `playtest`, `perf`, `release`, `session-summary`).
+Use diagnostics output to compare retrieval and synthesis timing across runs.
 
-## When To Use This Skill
+## Benchmark Loop
 
-- You changed auth/OAuth and need to validate the full browser login loop.
-- You changed Memory API endpoints and want a stable, repeatable way to exercise them.
-- You are building ingestion tooling (UE logs, traces) and want to upload/link large artifacts quickly.
-- You want a reliable "write memory + attach evidence" pattern at the end of an agentic coding session.
+Run the benchmark helper for repeated latency comparison:
 
+```powershell
+./scripts/benchmark-agent-retrieval.ps1 -Token "<gdm_api_key>" -ProjectId "<project-uuid>" -Iterations 12
+```
+
+Useful switches:
+
+- `-NoCache`
+- `-MemoryMode fast|balanced|deep`
+- `-RetrievalMode auto|memories|hybrid|documents`
+- `-CacheTtlMs <ms>`
+
+## Use This Skill When
+
+- validating OAuth + API key behavior end-to-end,
+- validating retrieval features after API/DB changes,
+- recording memory plus evidence assets from agentic coding sessions,
+- measuring performance regressions in retrieval routing.

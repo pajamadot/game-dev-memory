@@ -56,7 +56,7 @@ function llmBootstrapSnippet(): string {
     "",
     "# Agent diagnostics + cache tuning",
     "pajama agent ask --project-id <project-uuid> --query \"summarize recent build regressions\" --dry-run --diagnostics",
-    "pajama agent ask --project-id <project-uuid> --query \"summarize recent build regressions\" --dry-run --diagnostics --no-cache",
+    "pajama agent ask --project-id <project-uuid> --query \"summarize recent build regressions\" --dry-run --diagnostics --no-cache --cache-ttl-ms 15000",
     "```",
     "",
     "## Install Agent Skill: pajama-cli (Codex / Claude Code)",
